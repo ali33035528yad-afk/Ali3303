@@ -1,0 +1,85 @@
+workflows:
+  beatnova-android:
+    name: BeatNova Android APK
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    scripts:
+      - name: Extract BeatNova Online Player
+        script: |
+          set -e
+          rm -rf build_project
+          mkdir -p build_project
+
+          if [ -f "BeatNova-OnlinePlayer-Codemagic.zip" ]; then
+            unzip -q "BeatNova-OnlinePlayer-Codemagic.zip" -d build_project
+          else
+            echo "BeatNova-OnlinePlayer-Codemagic.zip not found"
+            ls -la
+            exit 1
+          fi
+
+          echo "Extracted files:"
+          find build_project -maxdepth 5 -type f | sort
+
+      - name: Find Gradle project
+        script: |
+          set -e
+
+          if [ -f "build_project/settings.gradle.kts" ]; then
+            PROJECT_DIR="$CM_BUILD_DIR/build_project"
+          elif [ -f "build_project/BeatNova/settings.gradle.kts" ]; then
+            PROJECT_DIR="$CM_BUILD_DIR/build_project/BeatNova"
+          else
+            echo "Gradle project not found"
+            find build_project -maxdepth 6 -type f | sort
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" > "$CM_BUILD_DIR/project.env"
+
+      - name: Check project files
+        script: |
+          set -e
+          source "$CM_BUILD_DIR/project.env"
+
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+
+          echo "BeatNova project files are OK."
+
+      - name: Set Android SDK
+        script: |
+          set -e
+          source "$CM_BUILD_DIR/project.env"
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$PROJECT_DIR/local.properties"
+
+      - name: Install Gradle 8.9
+        script: |
+          set -e
+          cd "$CM_BUILD_DIR"
+
+          curl -L --fail \
+            -o gradle.zip \
+            https://services.gradle.org/distributions/gradle-8.9-bin.zip
+
+          rm -rf gradle-8.9
+          unzip -q gradle.zip
+          rm -f gradle.zip
+
+      - name: Build BeatNova
+        script: |
+          set -e
+          source "$CM_BUILD_DIR/project.env"
+
+          cd "$PROJECT_DIR"
+
+          "$CM_BUILD_DIR/gradle-8.9/bin/gradle" \
+            --no-daemon \
+            --stacktrace \
+            assembleDebug
+
+    artifacts:
+      - $CM_BUILD_DIR/build_project/**/app/build/outputs/apk/debug/app-debug.apk
