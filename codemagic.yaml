@@ -2,7 +2,6 @@ workflows:
   beatnova-android:
     name: BeatNova Android
     max_build_duration: 45
-    instance_type: mac_mini_m2
 
     environment:
       java: 17
@@ -13,17 +12,25 @@ workflows:
         script: |
           set -e
 
-          cd "$CM_BUILD_DIR"
+          echo "======================================"
+          echo "Finding BeatNova ZIP..."
+          echo "======================================"
 
-          ZIP_FILE="$(find "$CM_BUILD_DIR" -maxdepth 1 -type f -iname 'BeatNova-*.zip' | head -n 1)"
+          ZIP_FILE="$(find "$CM_BUILD_DIR" -maxdepth 2 -type f -name 'BeatNova-OnlinePlayer-Release-Codemagic-Fixed2.zip' -print -quit)"
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: BeatNova ZIP not found"
-            ls -lah
+            ZIP_FILE="$(find "$CM_BUILD_DIR" -maxdepth 2 -type f -name 'BeatNova-*.zip' -print -quit)"
+          fi
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: BeatNova ZIP was not found."
+            echo "Repository files:"
+            find "$CM_BUILD_DIR" -maxdepth 3 -type f | sort
             exit 1
           fi
 
-          echo "ZIP: $ZIP_FILE"
+          echo "ZIP found:"
+          echo "$ZIP_FILE"
 
           rm -rf "$CM_BUILD_DIR/build_project"
           mkdir -p "$CM_BUILD_DIR/build_project"
@@ -32,52 +39,26 @@ workflows:
 
           PROJECT_DIR="$(find "$CM_BUILD_DIR/build_project" \
             -type f \
-            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
-            -print -quit | xargs dirname)"
+            \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) \
+            -print -quit)"
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android project not found"
+            echo "ERROR: settings.gradle(.kts) not found."
+            find "$CM_BUILD_DIR/build_project" -maxdepth 6 -type f | sort
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PROJECT_DIR")"
+
+          echo "PROJECT_DIR=$PROJECT_DIR"
+
+          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: app/build.gradle.kts not found."
+            find "$PROJECT_DIR" -maxdepth 5 -type f | sort
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" > "$CM_BUILD_DIR/project.env"
-
-          echo "Project:"
-          echo "$PROJECT_DIR"
-
-      - name: Fix Compose source
-        script: |
-          set -e
-
-          source "$CM_BUILD_DIR/project.env"
-
-          MAIN="$PROJECT_DIR/app/src/main/java/com/beatnova/app/MainActivity.kt"
-
-          if [ ! -f "$MAIN" ]; then
-            echo "ERROR: MainActivity.kt not found"
-            find "$PROJECT_DIR/app/src/main" -type f
-            exit 1
-          fi
-
-          echo "Fixing MainActivity.kt..."
-
-          # Fix wrong LocalLayoutDir name
-          sed -i.bak 's/LocalLayoutDir/LocalLayoutDirection/g' "$MAIN"
-
-          # Add LocalLayoutDirection import if missing
-          if ! grep -q "import androidx.compose.ui.unit.LocalLayoutDirection" "$MAIN"; then
-            sed -i.bak '/^import /a import androidx.compose.ui.unit.LocalLayoutDirection' "$MAIN"
-          fi
-
-          # Add NavigationBarItem import if missing
-          if grep -q "NavigationBarItem" "$MAIN"; then
-            if ! grep -q "import androidx.compose.material3.NavigationBarItem" "$MAIN"; then
-              sed -i.bak '/^import /a import androidx.compose.material3.NavigationBarItem' "$MAIN"
-            fi
-          fi
-
-          echo "=== MainActivity imports ==="
-          head -n 45 "$MAIN"
 
       - name: Check project
         script: |
@@ -85,11 +66,15 @@ workflows:
 
           source "$CM_BUILD_DIR/project.env"
 
+          echo "Checking Android project..."
+          echo "Project: $PROJECT_DIR"
+
           test -f "$PROJECT_DIR/settings.gradle.kts"
           test -f "$PROJECT_DIR/build.gradle.kts"
           test -f "$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
 
-          echo "Project structure OK"
+          echo "Project files OK."
 
       - name: Configure Android SDK
         script: |
@@ -99,22 +84,37 @@ workflows:
 
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$PROJECT_DIR/local.properties"
 
-      - name: Install Gradle
+          echo "Android SDK:"
+          echo "$ANDROID_SDK_ROOT"
+
+      - name: Prepare Gradle
         script: |
           set -e
 
-          cd "$CM_BUILD_DIR"
+          source "$CM_BUILD_DIR/project.env"
 
-          if [ ! -x "$CM_BUILD_DIR/gradle-8.9/bin/gradle" ]; then
+          cd "$PROJECT_DIR"
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            echo "Gradle wrapper found."
+          else
+            echo "Gradle wrapper not found."
+            echo "Installing Gradle 8.9..."
+
+            cd "$CM_BUILD_DIR"
+
             curl -L --fail \
               -o gradle.zip \
               https://services.gradle.org/distributions/gradle-8.9-bin.zip
 
+            rm -rf gradle-8.9
+
             unzip -q gradle.zip
             rm -f gradle.zip
-          fi
 
-          "$CM_BUILD_DIR/gradle-8.9/bin/gradle" --version
+            echo "Gradle installed."
+          fi
 
       - name: Build BeatNova
         script: |
@@ -124,11 +124,25 @@ workflows:
 
           cd "$PROJECT_DIR"
 
-          "$CM_BUILD_DIR/gradle-8.9/bin/gradle" \
-            --no-daemon \
-            --stacktrace \
-            clean \
-            assembleRelease
+          echo "======================================"
+          echo "Building BeatNova Release APK"
+          echo "======================================"
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+
+            ./gradlew \
+              --no-daemon \
+              --stacktrace \
+              clean \
+              assembleRelease
+          else
+            "$CM_BUILD_DIR/gradle-8.9/bin/gradle" \
+              --no-daemon \
+              --stacktrace \
+              clean \
+              assembleRelease
+          fi
 
       - name: Collect APK
         script: |
@@ -136,19 +150,33 @@ workflows:
 
           source "$CM_BUILD_DIR/project.env"
 
-          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          echo "Searching for APK..."
 
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK not found"
-            find "$PROJECT_DIR/app/build/outputs" -type f 2>/dev/null || true
+          APK="$(find "$PROJECT_DIR/app/build/outputs/apk" \
+            -type f \
+            -name '*.apk' \
+            -print -quit)"
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated."
+
+            if [ -d "$PROJECT_DIR/app/build/outputs" ]; then
+              find "$PROJECT_DIR/app/build/outputs" -type f | sort
+            fi
+
             exit 1
           fi
 
           mkdir -p "$CM_BUILD_DIR/artifacts"
 
-          cp "$APK" "$CM_BUILD_DIR/artifacts/BeatNova-release.apk"
+          cp "$APK" \
+            "$CM_BUILD_DIR/artifacts/BeatNova-release.apk"
 
+          echo "======================================"
           echo "APK READY"
+          echo "$CM_BUILD_DIR/artifacts/BeatNova-release.apk"
+          echo "======================================"
 
     artifacts:
       - artifacts/BeatNova-release.apk
+      - "**/app/build/outputs/**/*.apk"
