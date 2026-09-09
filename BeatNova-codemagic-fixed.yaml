@@ -1,0 +1,72 @@
+workflows:
+  beatnova-android:
+    name: BeatNova Online Player
+    max_build_duration: 30
+
+    environment:
+      android_signing:
+        - beatnova_keystore
+      vars:
+        SUPABASE_URL: $SUPABASE_URL
+        SUPABASE_ANON_KEY: $SUPABASE_ANON_KEY
+      java: 17
+
+    scripts:
+      - name: Find and extract BeatNova ZIP
+        script: |
+          set -e
+          ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file found in repository."
+            echo "Repository files:"
+            find . -maxdepth 3 -type f | sort | head -n 200
+            exit 1
+          fi
+
+          echo "Using ZIP: $ZIP_FILE"
+          rm -rf build_project
+          mkdir -p build_project
+          unzip -q "$ZIP_FILE" -d build_project
+
+          # Find the actual Gradle project root, even if the ZIP has a top-level folder.
+          GRADLE_DIR="$(find build_project -name settings.gradle -o -name settings.gradle.kts | head -n 1 | xargs -r dirname)"
+
+          if [ -z "$GRADLE_DIR" ]; then
+            echo "ERROR: Gradle project was not found inside the ZIP."
+            find build_project -maxdepth 4 -type f | sort | head -n 200
+            exit 1
+          fi
+
+          echo "Gradle project: $GRADLE_DIR"
+          echo "GRADLE_DIR=$GRADLE_DIR" > /tmp/beatnova_gradle_dir
+
+      - name: Build BeatNova
+        script: |
+          set -e
+          GRADLE_DIR="$(cut -d= -f2- /tmp/beatnova_gradle_dir)"
+          cd "$GRADLE_DIR"
+
+          chmod +x ./gradlew
+
+          ./gradlew clean assembleDebug --stacktrace
+
+      - name: Prepare APK
+        script: |
+          set -e
+          GRADLE_DIR="$(cut -d= -f2- /tmp/beatnova_gradle_dir)"
+          APK="$(find "$GRADLE_DIR/app/build/outputs/apk" -type f -name '*.apk' | head -n 1)"
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            find "$GRADLE_DIR/app/build/outputs" -type f 2>/dev/null || true
+            exit 1
+          fi
+
+          mkdir -p artifacts
+          cp "$APK" artifacts/BeatNova-debug.apk
+          echo "APK ready: artifacts/BeatNova-debug.apk"
+
+    artifacts:
+      - artifacts/*.apk
+      - "**/app/build/outputs/**/*.apk"
