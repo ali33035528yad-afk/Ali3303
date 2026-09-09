@@ -1,90 +1,154 @@
 workflows:
   beatnova-android:
     name: BeatNova Android
-    max_build_duration: 30
+    max_build_duration: 45
+    instance_type: mac_mini_m2
 
     environment:
       java: 17
 
     scripts:
+
       - name: Find and extract BeatNova ZIP
         script: |
           set -e
 
-          echo "Searching for ZIP file..."
+          cd "$CM_BUILD_DIR"
 
-          ZIP_FILE=$(find . -type f -iname "*.zip" | head -n 1)
+          echo "=== Repository files ==="
+          ls -lah
+
+          ZIP_FILE="$(find "$CM_BUILD_DIR" -maxdepth 1 -type f -iname 'BeatNova-*.zip' | head -n 1)"
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found!"
-            echo "Files in repository:"
-            find . -maxdepth 3 -type f | sort
+            echo "ERROR: BeatNova ZIP not found!"
             exit 1
           fi
 
-          echo "ZIP found: $ZIP_FILE"
+          echo "ZIP found:"
+          echo "$ZIP_FILE"
 
-          rm -rf build_project
-          mkdir -p build_project
+          rm -rf "$CM_BUILD_DIR/build_project"
+          mkdir -p "$CM_BUILD_DIR/build_project"
 
-          unzip -q "$ZIP_FILE" -d build_project
+          unzip -q "$ZIP_FILE" -d "$CM_BUILD_DIR/build_project"
 
-          echo "Searching for Gradle project..."
+          echo "=== Extracted files ==="
+          find "$CM_BUILD_DIR/build_project" -maxdepth 4 -type f | sort
 
-          GRADLE_DIR=$(find build_project -type f \
-            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
-            -print -quit | xargs -r dirname)
+          PROJECT_DIR="$(find "$CM_BUILD_DIR/build_project" \
+            -type f \
+            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
+            -print -quit | xargs dirname)"
 
-          if [ -z "$GRADLE_DIR" ]; then
-            echo "ERROR: Gradle project not found inside ZIP!"
-            find build_project -maxdepth 5 -type f | sort
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: settings.gradle.kts not found!"
             exit 1
           fi
 
-          echo "Gradle project found at:"
-          echo "$GRADLE_DIR"
+          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: app/build.gradle.kts not found!"
+            echo "Project directory:"
+            echo "$PROJECT_DIR"
+            exit 1
+          fi
 
-          echo "$GRADLE_DIR" > /tmp/gradle_dir
+          echo "PROJECT_DIR=$PROJECT_DIR" > "$CM_BUILD_DIR/project.env"
+
+          echo "================================"
+          echo "Android project found:"
+          echo "$PROJECT_DIR"
+          echo "================================"
+
+      - name: Check project
+        script: |
+          set -e
+
+          source "$CM_BUILD_DIR/project.env"
+
+          echo "Checking Android project..."
+
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+
+          echo "Project structure OK."
+
+      - name: Configure Android SDK
+        script: |
+          set -e
+
+          source "$CM_BUILD_DIR/project.env"
+
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$PROJECT_DIR/local.properties"
+
+          echo "Android SDK configured."
+
+      - name: Install Gradle
+        script: |
+          set -e
+
+          cd "$CM_BUILD_DIR"
+
+          if [ ! -x "$CM_BUILD_DIR/gradle-8.9/bin/gradle" ]; then
+            echo "Downloading Gradle 8.9..."
+
+            curl -L --fail \
+              -o gradle-8.9-bin.zip \
+              https://services.gradle.org/distributions/gradle-8.9-bin.zip
+
+            unzip -q gradle-8.9-bin.zip
+
+            rm -f gradle-8.9-bin.zip
+          fi
+
+          "$CM_BUILD_DIR/gradle-8.9/bin/gradle" --version
 
       - name: Build BeatNova
         script: |
           set -e
 
-          GRADLE_DIR=$(cat /tmp/gradle_dir)
+          source "$CM_BUILD_DIR/project.env"
 
-          cd "$GRADLE_DIR"
+          cd "$PROJECT_DIR"
 
-          echo "Project directory:"
-          pwd
+          echo "================================"
+          echo "Building BeatNova Release APK"
+          echo "================================"
 
-          echo "Project files:"
-          ls -la
+          "$CM_BUILD_DIR/gradle-8.9/bin/gradle" \
+            --no-daemon \
+            --stacktrace \
+            clean \
+            assembleRelease
 
-          chmod +x gradlew
-
-          ./gradlew clean assembleDebug --stacktrace
-
-      - name: Prepare APK
+      - name: Collect APK
         script: |
           set -e
 
-          GRADLE_DIR=$(cat /tmp/gradle_dir)
+          source "$CM_BUILD_DIR/project.env"
 
-          APK=$(find "$GRADLE_DIR/app/build/outputs/apk" \
-            -type f -name "*.apk" | head -n 1)
+          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
 
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated!"
-            find "$GRADLE_DIR/app/build/outputs" -type f 2>/dev/null || true
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK not found!"
+
+            find "$PROJECT_DIR/app/build/outputs" \
+              -type f 2>/dev/null || true
+
             exit 1
           fi
 
-          mkdir -p artifacts
+          mkdir -p "$CM_BUILD_DIR/artifacts"
 
-          cp "$APK" artifacts/BeatNova-debug.apk
+          cp "$APK" \
+            "$CM_BUILD_DIR/artifacts/BeatNova-release.apk"
 
-          echo "APK created successfully:"
-          ls -lh artifacts/BeatNova-debug.apk
+          echo "================================"
+          echo "APK CREATED SUCCESSFULLY"
+          echo "$CM_BUILD_DIR/artifacts/BeatNova-release.apk"
+          echo "================================"
 
     artifacts:
-      - artifacts/*.apk
+      - artifacts/BeatNova-release.apk
