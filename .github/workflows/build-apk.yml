@@ -36,6 +36,25 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Prepare Android debug keystore for release test build
+        run: |
+          set -e
+          KEYSTORE="$HOME/.config/.android/debug.keystore"
+          mkdir -p "$(dirname "$KEYSTORE")"
+          if [ ! -f "$KEYSTORE" ]; then
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          test -f "$KEYSTORE"
+          echo "Debug keystore ready: $KEYSTORE"
+
       - name: Build Release APK
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
