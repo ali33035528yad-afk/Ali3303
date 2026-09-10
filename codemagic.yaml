@@ -13,31 +13,23 @@ workflows:
         script: |
           set -euo pipefail
           cd "$CM_BUILD_DIR"
-
-          # The repository currently stores the complete Android project in this ZIP.
-          # Extract it before Gradle/Codemagic performs the build.
           if [ ! -f settings.gradle.kts ]; then
             ZIP_FILE="$(find "$CM_BUILD_DIR" -maxdepth 2 -type f -name 'BeatNova-*.zip' -print -quit)"
             if [ -z "${ZIP_FILE:-}" ]; then
               echo "ERROR: BeatNova project ZIP was not found."
               exit 1
             fi
-
             rm -rf .beatnova_extract
             mkdir -p .beatnova_extract
-            echo "Extracting $ZIP_FILE"
             unzip -q -o "$ZIP_FILE" -d .beatnova_extract
-
             PROJECT_DIR="$(find .beatnova_extract -type f -name settings.gradle.kts -print -quit | xargs -r dirname)"
             if [ -z "${PROJECT_DIR:-}" ]; then
               echo "ERROR: settings.gradle.kts was not found in the BeatNova archive."
               exit 1
             fi
-
             find "$PROJECT_DIR" -mindepth 1 -maxdepth 1 -exec cp -a {} "$CM_BUILD_DIR/" \;
             rm -rf .beatnova_extract
           fi
-
           test -f settings.gradle.kts
           test -f build.gradle.kts
           test -f app/build.gradle.kts
@@ -45,38 +37,40 @@ workflows:
           test -f app/src/main/java/com/beatnova/app/MainActivity.kt
           echo "BeatNova Android project is ready."
 
+          # Compatibility fix: avoid NavigationBarItem resolution failures on
+          # Codemagic/Compose combinations by using a plain clickable nav item.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("app/src/main/java/com/beatnova/app/MainActivity.kt")
+          s = p.read_text()
+          s = s.replace("import androidx.compose.material3.NavigationBarItem\n", "")
+          old = '''@Composable private fun NavItem(index: Int, label: String, icon: ImageVector, selected: Int, onClick: () -> Unit) {\n    NavigationBarItem(selected = index == selected, onClick = onClick, icon = { Icon(icon, label) }, label = { Text(label, fontSize = 11.sp) })\n}\n'''
+          new = '''@Composable private fun NavItem(index: Int, label: String, icon: ImageVector, selected: Int, onClick: () -> Unit) {\n    val isSelected = index == selected\n    Column(\n        modifier = Modifier.weight(1f).clickable(onClick = onClick).padding(vertical = 8.dp),\n        horizontalAlignment = Alignment.CenterHorizontally\n    ) {\n        Icon(icon, contentDescription = label, tint = if (isSelected) Purple else Muted, modifier = Modifier.size(24.dp))\n        Text(label, color = if (isSelected) White else Muted, fontSize = 11.sp)\n    }\n}\n'''
+          if old in s:
+              s = s.replace(old, new)
+          p.write_text(s)
+          PY
+
       - name: Configure Android SDK
         script: |
           set -euo pipefail
-
-          # Codemagic images expose ANDROID_HOME/ANDROID_SDK_ROOT, but sdkmanager
-          # is not guaranteed to be on PATH. Locate it explicitly.
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
             echo "ERROR: Android SDK root was not found."
-            env | grep -E 'ANDROID_(HOME|SDK_ROOT)' || true
             exit 1
           fi
-
           SDKMANAGER=""
           for candidate in \
             "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
             "$SDK_ROOT/cmdline-tools/bin/sdkmanager" \
             "$SDK_ROOT/tools/bin/sdkmanager"; do
-            if [ -x "$candidate" ]; then
-              SDKMANAGER="$candidate"
-              break
-            fi
+            if [ -x "$candidate" ]; then SDKMANAGER="$candidate"; break; fi
           done
-
           if [ -z "$SDKMANAGER" ]; then
             echo "ERROR: sdkmanager was not found under $SDK_ROOT."
-            find "$SDK_ROOT" -type f -name sdkmanager -print 2>/dev/null || true
             exit 1
           fi
-
           export PATH="$(dirname "$SDKMANAGER"):$SDK_ROOT/platform-tools:$PATH"
-          echo "Using sdkmanager: $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
           "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
