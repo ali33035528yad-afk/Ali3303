@@ -1,6 +1,6 @@
 workflows:
   beatnova-android:
-    name: BeatNova Android Final
+    name: BeatNova Android APK
     max_build_duration: 30
     environment:
       java: 17
@@ -9,36 +9,76 @@ workflows:
         SUPABASE_URL: $SUPABASE_URL
         SUPABASE_ANON_KEY: $SUPABASE_ANON_KEY
     scripts:
-      - name: Check project
+      - name: Prepare BeatNova project
         script: |
-          set -e
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+
+          # The repository currently stores the complete Android project in this ZIP.
+          # Extract it before Gradle/Codemagic performs the build.
+          if [ ! -f settings.gradle.kts ]; then
+            ZIP_FILE="$(find "$CM_BUILD_DIR" -maxdepth 2 -type f -name 'BeatNova-*.zip' -print -quit)"
+            if [ -z "${ZIP_FILE:-}" ]; then
+              echo "ERROR: BeatNova project ZIP was not found."
+              exit 1
+            fi
+
+            rm -rf .beatnova_extract
+            mkdir -p .beatnova_extract
+            echo "Extracting $ZIP_FILE"
+            unzip -q -o "$ZIP_FILE" -d .beatnova_extract
+
+            PROJECT_DIR="$(find .beatnova_extract -type f -name settings.gradle.kts -print -quit | xargs -r dirname)"
+            if [ -z "${PROJECT_DIR:-}" ]; then
+              echo "ERROR: settings.gradle.kts was not found in the BeatNova archive."
+              exit 1
+            fi
+
+            # Copy the project into the build root but keep this repository's
+            # Codemagic configuration as the authoritative workflow file.
+            find "$PROJECT_DIR" -mindepth 1 -maxdepth 1 -exec cp -a {} "$CM_BUILD_DIR/" \;
+            rm -rf .beatnova_extract
+          fi
+
           test -f settings.gradle.kts
           test -f build.gradle.kts
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
           test -f app/src/main/java/com/beatnova/app/MainActivity.kt
-          echo "BeatNova project OK"
+          echo "BeatNova Android project is ready."
+
       - name: Configure Android SDK
         script: |
-          set -e
+          set -euo pipefail
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" >/dev/null 2>&1 || true
-      - name: Prepare Gradle
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Prepare Gradle 8.9
         script: |
-          set -e
+          set -euo pipefail
           cd "$CM_BUILD_DIR"
           if [ ! -x "$CM_BUILD_DIR/gradle-8.9/bin/gradle" ]; then
-            curl -L --fail --retry 3 -o gradle.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
+            curl -L --fail --retry 3 -o gradle-8.9-bin.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
             rm -rf gradle-8.9
-            unzip -q gradle.zip
-            rm -f gradle.zip
+            unzip -q gradle-8.9-bin.zip
+            rm -f gradle-8.9-bin.zip
           fi
           "$CM_BUILD_DIR/gradle-8.9/bin/gradle" --version
-      - name: Build BeatNova Release
+
+      - name: Build BeatNova release APK
         script: |
-          set -e
+          set -euo pipefail
           cd "$CM_BUILD_DIR"
           "$CM_BUILD_DIR/gradle-8.9/bin/gradle" --no-daemon --stacktrace clean assembleRelease
+
+      - name: Verify APK output
+        script: |
+          set -euo pipefail
+          APK="$CM_BUILD_DIR/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          ls -lh "$APK"
+          echo "APK_BUILD_SUCCESS=true"
+
     artifacts:
       - app/build/outputs/apk/release/*.apk
       - app/build/outputs/apk/release/output-metadata.json
