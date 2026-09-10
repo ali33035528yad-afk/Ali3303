@@ -66,6 +66,20 @@ jobs:
           fi
           test -f "$KEYSTORE"
 
+      - name: Fix notification compatibility
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/beatnova/app/MainActivity.kt')
+          s = p.read_text()
+          old = '.setStyle(NotificationCompat.MediaStyle().setShowActionsInCompactView(0))'
+          if old in s:
+              p.write_text(s.replace(old, ''))
+              print('Removed unsupported MediaStyle call.')
+          else:
+              print('MediaStyle call already fixed.')
+          PY
+
       - name: Build Release APK
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
