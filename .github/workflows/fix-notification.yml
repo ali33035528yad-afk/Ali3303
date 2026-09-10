@@ -1,0 +1,30 @@
+name: Fix notification build
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-notification.yml'
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove unsupported MediaStyle call
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/beatnova/app/MainActivity.kt')
+          s = p.read_text()
+          old = '.setStyle(NotificationCompat.MediaStyle().setShowActionsInCompactView(0))'
+          if old not in s:
+              raise SystemExit('target text not found')
+          p.write_text(s.replace(old, ''))
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/beatnova/app/MainActivity.kt
+          git commit -m 'fix: repair notification MediaStyle build error'
+          git push
