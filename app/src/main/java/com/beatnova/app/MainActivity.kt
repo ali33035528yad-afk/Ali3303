@@ -7,7 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,37 +35,44 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 
-private val Bg = Color(0xFF07080D)
-private val Panel = Color(0xFF11131B)
-private val Panel2 = Color(0xFF181A24)
-private val Muted = Color(0xFF9B9DAB)
+private val Bg = Color(0xFF08090F)
+private val Panel = Color(0xFF12141D)
+private val Panel2 = Color(0xFF1B1D28)
 private val White = Color(0xFFF8F8FC)
+private val Muted = Color(0xFF9699A9)
 private val Purple = Color(0xFFC65CFF)
-private val Blue = Color(0xFF5B7CFF)
+private val Blue = Color(0xFF617CFF)
 private val Pink = Color(0xFFFF3E9D)
 
-private data class Song(val id: String, val title: String, val artist: String, val audioUrl: String, val coverUrl: String = "")
+private data class Song(val id: String, val title: String, val artist: String, val audioUrl: String)
 
-private object Repo {
+private object SongRepository {
     private val client = OkHttpClient()
-    suspend fun songs(): Result<List<Song>> = withContext(Dispatchers.IO) {
-        val url = BuildConfig.SUPABASE_URL.trimEnd('/')
+    suspend fun load(): Result<List<Song>> = withContext(Dispatchers.IO) {
+        val base = BuildConfig.SUPABASE_URL.trimEnd('/')
         val key = BuildConfig.SUPABASE_ANON_KEY
-        if (url.isBlank() || key.isBlank()) return@withContext Result.failure(IllegalStateException("CONFIG"))
+        if (base.isBlank() || key.isBlank()) return@withContext Result.failure(Exception("SUPABASE_CONFIG"))
         try {
-            val req = Request.Builder().url("$url/rest/v1/songs?select=*")
-                .addHeader("apikey", key).addHeader("Authorization", "Bearer $key").build()
-            client.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) return@withContext Result.failure(IllegalStateException("HTTP_${r.code}"))
-                val json = JSONArray(r.body?.string().orEmpty())
-                val out = buildList {
-                    for (i in 0 until json.length()) {
-                        val o = json.getJSONObject(i)
-                        val audio = o.optString("audio_url")
-                        if (audio.isNotBlank()) add(Song(o.optString("id", i.toString()), o.optString("title", "بدون نام"), o.optString("artist", "هنرمند ناشناس"), audio, o.optString("cover_url")))
-                    }
+            val request = Request.Builder()
+                .url("$base/rest/v1/songs?select=id,title,artist,audio_url&order=created_at.desc")
+                .addHeader("apikey", key)
+                .addHeader("Authorization", "Bearer $key")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("HTTP_${response.code}"))
+                val array = JSONArray(response.body?.string().orEmpty())
+                val result = mutableListOf<Song>()
+                for (i in 0 until array.length()) {
+                    val o = array.getJSONObject(i)
+                    val audio = o.optString("audio_url")
+                    if (audio.isNotBlank()) result += Song(
+                        o.optString("id", i.toString()),
+                        o.optString("title", "بدون نام"),
+                        o.optString("artist", "هنرمند ناشناس"),
+                        audio
+                    )
                 }
-                Result.success(out)
+                Result.success(result)
             }
         } catch (e: Exception) { Result.failure(e) }
     }
@@ -75,120 +81,235 @@ private object Repo {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { BeatNova() }
+        setContent { BeatNovaApp() }
     }
 }
 
 @Composable
-private fun BeatNova() {
+private fun BeatNovaApp() {
     val context = LocalContext.current
     val player = remember { ExoPlayer.Builder(context).build() }
     val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
-    var songs by remember { mutableStateOf<List<Song>>(emptyList()) }
+    var songs by remember { mutableStateOf(emptyList<Song>()) }
     var current by remember { mutableStateOf<Song?>(null) }
     var playing by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
-    var favorites by remember { mutableStateOf(setOf<String>()) }
-    var showPlayer by remember { mutableStateOf(false) }
+    var favorites by remember { mutableStateOf(emptySet<String>()) }
 
     fun refresh() = scope.launch {
-        loading = true; error = null
-        Repo.songs().onSuccess { songs = it }.onFailure { error = it.message ?: "ERROR" }
+        loading = true
+        error = null
+        SongRepository.load().onSuccess { songs = it }.onFailure { error = it.message }
         loading = false
     }
+
     fun play(song: Song) {
         current = song
         player.setMediaItem(MediaItem.fromUri(song.audioUrl))
-        player.prepare(); player.play(); playing = true
+        player.prepare()
+        player.play()
     }
-    fun toggle() {
+
+    fun togglePlay() {
         if (player.isPlaying) player.pause() else if (current != null) player.play()
-        playing = player.isPlaying
     }
+
     DisposableEffect(player) {
         val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(v: Boolean) { playing = v }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
             override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) playing = false }
         }
         player.addListener(listener)
         onDispose { player.removeListener(listener); player.release() }
     }
+
     LaunchedEffect(Unit) { refresh() }
 
-    val filtered = songs.filter { query.isBlank() || it.title.contains(query, true) || it.artist.contains(query, true) }
-    val liked = songs.filter { it.id in favorites }
-
     MaterialTheme(colorScheme = darkColorScheme(primary = Purple, background = Bg, surface = Panel, onSurface = White)) {
-        Scaffold(
-            containerColor = Bg,
-            bottomBar = {
-                Column {
-                    if (current != null) MiniPlayer(current!!, playing, { toggle() }, { showPlayer = true })
-                    NavigationBar(containerColor = Color(0xFF0D0E14), tonalElevation = 0.dp) {
-                        NavItem(0, "خانه", Icons.Default.Home, tab) { tab = 0 }
-                        NavItem(1, "جستجو", Icons.Default.Search, tab) { tab = 1 }
-                        NavItem(2, "کتابخانه", Icons.Default.LibraryMusic, tab) { tab = 2 }
-                        NavItem(3, "تنظیمات", Icons.Default.Settings, tab) { tab = 3 }
-                    }
+        Column(Modifier.fillMaxSize().background(Bg)) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                when (tab) {
+                    0 -> HomeScreen(songs, loading, error, current, playing, ::refresh, ::play)
+                    1 -> SearchScreen(query, { query = it }, songs.filter { query.isBlank() || it.title.contains(query, true) || it.artist.contains(query, true) }, current, ::play)
+                    2 -> LibraryScreen(songs.filter { it.id in favorites }, current, ::play)
+                    else -> SettingsScreen()
                 }
             }
-        ) { pad ->
-            Box(Modifier.fillMaxSize().padding(pad)) {
-                when (tab) {
-                    0 -> Home(filtered, current, playing, loading, error, ::refresh, ::play, favorites) { id -> favorites = if (id in favorites) favorites - id else favorites + id }
-                    1 -> Search(query, { query = it }, filtered, current, ::play, favorites) { id -> favorites = if (id in favorites) favorites - id else favorites + id }
-                    2 -> Library(liked, current, ::play, favorites) { id -> favorites = if (id in favorites) favorites - id else favorites + id }
-                    else -> Settings()
+            current?.let { MiniPlayer(it, playing, ::togglePlay) }
+            BottomBar(tab) { tab = it }
+        }
+    }
+}
+
+@Composable
+private fun HomeScreen(songs: List<Song>, loading: Boolean, error: String?, current: Song?, playing: Boolean, refresh: () -> Unit, play: (Song) -> Unit) {
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 28.dp)) {
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("موسیقی برای هر لحظه", color = Muted, fontSize = 13.sp)
+                    Text("BeatNova", color = White, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
                 }
-                if (showPlayer && current != null) NowPlaying(current!!, playing, { toggle() }, { showPlayer = false })
+                IconButton(onClick = refresh) { Icon(Icons.Default.Refresh, "به‌روزرسانی", tint = White) }
+            }
+        }
+        item { HeroCard(songs.size, current != null && playing) }
+        item { SectionHeader("کشف موسیقی", "ویژه شما") }
+        item { FeatureCard("ترندهای امروز", "آهنگ‌های جدید و محبوب خودت را پیدا کن", Icons.Default.TrendingUp, Pink) }
+        item { FeatureCard("کتابخانه شخصی", "آهنگ‌های مورد علاقه‌ات را یکجا نگه دار", Icons.Default.Favorite, Purple) }
+        item { SectionHeader("جدیدترین آهنگ‌ها", if (songs.isEmpty()) "آنلاین" else "${songs.size} آهنگ") }
+        when {
+            loading -> item { LoadingBox() }
+            error != null -> item { EmptyState("اتصال به کتابخانه آماده نیست", "Supabase یا جدول songs را بررسی کن", Icons.Default.CloudOff) }
+            songs.isEmpty() -> item { EmptyState("هنوز آهنگی اضافه نشده", "آهنگ‌های مجاز خودت را در جدول songs قرار بده.", Icons.Default.LibraryMusic) }
+            else -> items(songs.take(30), key = { it.id }) { song -> SongRow(song, current?.id == song.id, play) }
+        }
+    }
+}
+
+@Composable
+private fun HeroCard(count: Int, isPlaying: Boolean) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(30.dp)).background(Brush.linearGradient(listOf(Color(0xFF32135C), Color(0xFF1B2354), Color(0xFF12131D)))).padding(22.dp)) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(64.dp).clip(RoundedCornerShape(20.dp)).background(Brush.linearGradient(listOf(Pink, Purple))), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.MusicNote, null, tint = White, modifier = Modifier.size(34.dp))
+                }
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text("ONLINE MUSIC", color = Color(0xFFE0B9FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("صدای لحظه‌های تو", color = White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Text("کشف کن • پخش کن • لذت ببر", color = White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.height(7.dp))
+            Text("BeatNova یک پخش‌کننده موسیقی ساده و سریع برای کتابخانه مجاز توست.", color = Color(0xFFD1D0DC), fontSize = 13.sp)
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BadgePill("$count آهنگ", Icons.Default.QueueMusic)
+                BadgePill(if (isPlaying) "در حال پخش" else "آماده پخش", Icons.Default.PlayArrow)
             }
         }
     }
 }
 
 @Composable
-private fun RowScope.NavItem(index: Int, label: String, icon: ImageVector, selected: Int, onClick: () -> Unit) {
-    val isSelected = index == selected
-    Box(Modifier.weight(1f).fillMaxHeight().clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Icon(icon, label, tint = if (isSelected) Purple else Muted, modifier = Modifier.size(24.dp))
+private fun FeatureCard(title: String, subtitle: String, icon: ImageVector, color: Color) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp).clip(RoundedCornerShape(22.dp)).background(Panel).padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(50.dp).clip(RoundedCornerShape(16.dp)).background(color.copy(alpha = .14f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = color, modifier = Modifier.size(25.dp)) }
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)) { Text(title, color = White, fontWeight = FontWeight.Bold, fontSize = 15.sp); Text(subtitle, color = Muted, fontSize = 11.sp, maxLines = 2) }
+        Icon(Icons.Default.ChevronLeft, null, tint = Muted)
+    }
+}
+
+@Composable
+private fun BadgePill(text: String, icon: ImageVector) {
+    Row(Modifier.clip(CircleShape).background(Color.White.copy(alpha = .10f)).padding(horizontal = 11.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = White, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(5.dp)); Text(text, color = White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, action: String) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(action, color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun LoadingBox() { Box(Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Purple) } }
+
+@Composable
+private fun EmptyState(title: String, subtitle: String, icon: ImageVector) {
+    Column(Modifier.fillMaxWidth().padding(24.dp).clip(RoundedCornerShape(24.dp)).background(Panel).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, null, tint = Purple, modifier = Modifier.size(42.dp))
+        Spacer(Modifier.height(12.dp))
+        Text(title, color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(5.dp))
+        Text(subtitle, color = Muted, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun SongRow(song: Song, selected: Boolean, play: (Song) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp).clip(RoundedCornerShape(18.dp)).background(if (selected) Color(0xFF241A35) else Panel).clickable { play(song) }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(Brush.linearGradient(listOf(Blue, Purple))), contentAlignment = Alignment.Center) { Icon(if (selected) Icons.Default.GraphicEq else Icons.Default.MusicNote, null, tint = White, modifier = Modifier.size(27.dp)) }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) { Text(song.title, color = White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        Box(Modifier.size(38.dp).clip(CircleShape).background(if (selected) Purple else Panel2), contentAlignment = Alignment.Center) { Icon(if (selected) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = White) }
+    }
+}
+
+@Composable
+private fun SearchScreen(query: String, onQuery: (String) -> Unit, songs: List<Song>, current: Song?, play: (Song) -> Unit) {
+    Column(Modifier.fillMaxSize().padding(top = 22.dp)) {
+        Text("جستجو", color = White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 20.dp))
+        Text("آهنگ یا هنرمند مورد علاقه‌ات را پیدا کن", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth().padding(16.dp), singleLine = true, placeholder = { Text("نام آهنگ یا خواننده") }, leadingIcon = { Icon(Icons.Default.Search, null) }, shape = RoundedCornerShape(18.dp))
+        LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) { if (songs.isEmpty()) item { EmptyState("نتیجه‌ای پیدا نشد", "جستجو را تغییر بده یا آهنگ اضافه کن.", Icons.Default.SearchOff) } else items(songs, key = { it.id }) { SongRow(it, current?.id == it.id, play) } }
+    }
+}
+
+@Composable
+private fun LibraryScreen(songs: List<Song>, current: Song?, play: (Song) -> Unit) {
+    Column(Modifier.fillMaxSize().padding(top = 22.dp)) {
+        Text("کتابخانه من", color = White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 20.dp))
+        Text("آهنگ‌های مورد علاقه‌ات", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        LazyColumn(contentPadding = PaddingValues(top = 14.dp, bottom = 24.dp)) { if (songs.isEmpty()) item { EmptyState("کتابخانه خالی است", "بعداً آهنگ‌های مورد علاقه را اینجا می‌بینی.", Icons.Default.FavoriteBorder) } else items(songs, key = { it.id }) { SongRow(it, current?.id == it.id, play) } }
+    }
+}
+
+@Composable
+private fun SettingsScreen() {
+    Column(Modifier.fillMaxSize().padding(22.dp)) {
+        Text("تنظیمات", color = White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+        Spacer(Modifier.height(20.dp))
+        SettingRow("کیفیت پخش", "بهینه برای اینترنت موبایل", Icons.Default.HighQuality)
+        SettingRow("ظاهر برنامه", "تم تیره BeatNova", Icons.Default.DarkMode)
+        SettingRow("درباره BeatNova", "نسخه 1.1.0", Icons.Default.Info)
+    }
+}
+
+@Composable
+private fun SettingRow(title: String, subtitle: String, icon: ImageVector) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(18.dp)).background(Panel).padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Purple, modifier = Modifier.size(25.dp)); Spacer(Modifier.width(14.dp)); Column { Text(title, color = White, fontWeight = FontWeight.Bold); Text(subtitle, color = Muted, fontSize = 11.sp) }
+    }
+}
+
+@Composable
+private fun MiniPlayer(song: Song, playing: Boolean, toggle: () -> Unit) {
+    Row(Modifier.fillMaxWidth().background(Color(0xFF171824)).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Pink, Purple))), contentAlignment = Alignment.Center) { Icon(Icons.Default.MusicNote, null, tint = White) }
+        Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text(song.title, color = White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Muted, fontSize = 11.sp) }
+        IconButton(onClick = toggle) { Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = White) }
+    }
+}
+
+@Composable
+private fun BottomBar(selected: Int, onSelect: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(76.dp).background(Color(0xFF0E0F16)), verticalAlignment = Alignment.CenterVertically) {
+        BottomItem(0, "خانه", Icons.Default.Home, selected, onSelect)
+        BottomItem(1, "جستجو", Icons.Default.Search, selected, onSelect)
+        BottomItem(2, "کتابخانه", Icons.Default.LibraryMusic, selected, onSelect)
+        BottomItem(3, "تنظیمات", Icons.Default.Settings, selected, onSelect)
+    }
+}
+
+@Composable
+private fun RowScope.BottomItem(index: Int, label: String, icon: ImageVector, selected: Int, onSelect: (Int) -> Unit) {
+    val active = index == selected
+    Box(Modifier.weight(1f).fillMaxHeight().clickable { onSelect(index) }, contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, null, tint = if (active) Purple else Muted, modifier = Modifier.size(25.dp))
             Spacer(Modifier.height(3.dp))
-            Text(label, color = if (isSelected) White else Muted, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+            Text(label, color = if (active) White else Muted, fontSize = 11.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
         }
     }
 }
-
-@Composable private fun Home(songs: List<Song>, current: Song?, playing: Boolean, loading: Boolean, error: String?, refresh: () -> Unit, play: (Song) -> Unit, favs: Set<String>, fav: (String) -> Unit) {
-    LazyColumn(contentPadding = PaddingValues(bottom = 20.dp), modifier = Modifier.fillMaxSize()) {
-        item { Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 22.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("سلام 👋", color = Muted, fontSize = 14.sp); Text("BeatNova", color = White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold) }; IconButton(onClick = refresh) { Icon(Icons.Default.Refresh, "به‌روزرسانی", tint = White) } } }
-        item { HeroCard(songs.size, current, playing) }
-        item { SectionTitle("دسته‌بندی‌ها", "همه") }
-        item { LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) { item { Category("میکس‌ها", Icons.Default.MusicNote, Purple) }; item { Category("ترندها", Icons.Default.TrendingUp, Pink) }; item { Category("آرامش", Icons.Default.Headphones, Blue) }; item { Category("آلبوم‌ها", Icons.Default.Album, Color(0xFF00C7A5)) } } }
-        item { SectionTitle("جدیدترین‌ها", "${songs.size} آهنگ") }
-        if (error != null) item { InfoBanner(error) }
-        if (loading) item { Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Purple) } }
-        else if (songs.isEmpty()) item { Empty() }
-        else items(songs.take(30), key = { it.id }) { SongItem(it, current?.id == it.id, it.id in favs, play, fav) }
-    }
-}
-
-@Composable private fun HeroCard(count: Int, current: Song?, playing: Boolean) { Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(28.dp)).background(Brush.linearGradient(listOf(Color(0xFF2C1550), Color(0xFF131A42), Color(0xFF10121B)))).padding(22.dp)) { Column { Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(58.dp).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(Pink, Purple))), contentAlignment = Alignment.Center) { Icon(Icons.Default.MusicNote, null, tint = White, modifier = Modifier.size(32.dp)) }; Spacer(Modifier.width(14.dp)); Column { Text("ONLINE MUSIC", color = Color(0xFFDAB7FF), fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("موسیقی، همیشه با تو", color = White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold) } }; Spacer(Modifier.height(22.dp)); Text("کشف کن • پخش کن • لذت ببر", color = White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold); Text("کتابخانه آنلاین BeatNova را با آهنگ‌های مجاز خودت بساز.", color = Color(0xFFD2D1DC), fontSize = 13.sp); Spacer(Modifier.height(18.dp)); Row(verticalAlignment = Alignment.CenterVertically) { Pill("$count آهنگ", Icons.Default.QueueMusic); Spacer(Modifier.width(8.dp)); Pill(if (current != null && playing) "در حال پخش" else "آماده پخش", Icons.Default.PlayArrow) } } } }
-
-@Composable private fun Pill(text: String, icon: ImageVector) { Row(Modifier.clip(CircleShape).background(Color.White.copy(alpha = .10f)).padding(horizontal = 11.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, tint = White, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(5.dp)); Text(text, color = White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) } }
-@Composable private fun SectionTitle(title: String, action: String) { Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) { Text(title, color = White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Text(action, color = Purple, fontSize = 12.sp, fontWeight = FontWeight.Bold) } }
-@Composable private fun Category(name: String, icon: ImageVector, color: Color) { Column(Modifier.width(82.dp), horizontalAlignment = Alignment.CenterHorizontally) { Box(Modifier.size(62.dp).clip(RoundedCornerShape(20.dp)).background(color.copy(alpha = .14f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = color, modifier = Modifier.size(27.dp)) }; Spacer(Modifier.height(7.dp)); Text(name, color = Muted, fontSize = 11.sp) } }
-
-@Composable private fun Search(query: String, change: (String) -> Unit, songs: List<Song>, current: Song?, play: (Song) -> Unit, favs: Set<String>, fav: (String) -> Unit) { Column(Modifier.fillMaxSize().padding(top = 22.dp)) { Text("جستجو", color = White, fontSize = 29.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 20.dp)); Text("آهنگ یا هنرمند مورد علاقه‌ات را پیدا کن", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)); OutlinedTextField(query, change, Modifier.fillMaxWidth().padding(16.dp), singleLine = true, placeholder = { Text("نام آهنگ یا خواننده") }, leadingIcon = { Icon(Icons.Default.Search, null) }, shape = RoundedCornerShape(18.dp)); LazyColumn(contentPadding = PaddingValues(bottom = 20.dp)) { if (songs.isEmpty()) item { Empty() } else items(songs, key = { it.id }) { SongItem(it, current?.id == it.id, it.id in favs, play, fav) } } } }
-@Composable private fun Library(songs: List<Song>, current: Song?, play: (Song) -> Unit, favs: Set<String>, fav: (String) -> Unit) { Column(Modifier.fillMaxSize().padding(top = 22.dp)) { Text("کتابخانه من", color = White, fontSize = 29.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 20.dp)); Text("آهنگ‌های مورد علاقه‌ات", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)); LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(top = 14.dp, bottom = 20.dp)) { if (songs.isEmpty()) item { Empty() } else items(songs, key = { it.id }) { SongItem(it, current?.id == it.id, it.id in favs, play, fav) } } } }
-
-@Composable private fun SongItem(song: Song, selected: Boolean, favorite: Boolean, play: (Song) -> Unit, fav: (String) -> Unit) { Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp).clip(RoundedCornerShape(19.dp)).background(if (selected) Color(0xFF211A31) else Panel).clickable { play(song) }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(58.dp).clip(RoundedCornerShape(16.dp)).background(Brush.linearGradient(listOf(Blue.copy(alpha = .75f), Purple.copy(alpha = .85f)))), contentAlignment = Alignment.Center) { Icon(if (selected) Icons.Default.GraphicEq else Icons.Default.MusicNote, null, tint = White, modifier = Modifier.size(27.dp)) }; Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(song.title, color = White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }; IconButton(onClick = { fav(song.id) }) { Icon(if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (favorite) Pink else Muted) }; Box(Modifier.size(38.dp).clip(CircleShape).background(if (selected) Purple else Panel2), contentAlignment = Alignment.Center) { Icon(if (selected) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = White, modifier = Modifier.size(20.dp)) } } }
-@Composable private fun MiniPlayer(song: Song, playing: Boolean, toggle: () -> Unit, open: () -> Unit) { Row(Modifier.fillMaxWidth().background(Color(0xFF151621)).clickable { open() }.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(46.dp).clip(RoundedCornerShape(13.dp)).background(Brush.linearGradient(listOf(Pink, Purple))), contentAlignment = Alignment.Center) { Icon(Icons.Default.MusicNote, null, tint = White) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text(song.title, color = White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Muted, fontSize = 11.sp) }; IconButton(onClick = toggle) { Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = White) } } }
-@Composable private fun NowPlaying(song: Song, playing: Boolean, toggle: () -> Unit, close: () -> Unit) { Box(Modifier.fillMaxSize().background(Bg)) { Column(Modifier.fillMaxSize().statusBarsPadding().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = close) { Icon(Icons.Default.KeyboardArrowDown, "بستن", tint = White) }; Text("در حال پخش", color = White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Icon(Icons.Default.MoreHoriz, null, tint = Muted) }; Spacer(Modifier.height(48.dp)); Box(Modifier.size(280.dp).clip(RoundedCornerShape(38.dp)).background(Brush.linearGradient(listOf(Color(0xFF2C1B50), Color(0xFF15204A), Color(0xFF40123B)))), contentAlignment = Alignment.Center) { Icon(Icons.Default.MusicNote, null, tint = White, modifier = Modifier.size(110.dp)) }; Spacer(Modifier.height(34.dp)); Text(song.title, color = White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Muted, fontSize = 14.sp); Spacer(Modifier.height(28.dp)); LinearProgressIndicator(progress = { if (playing) .45f else .0f }, Modifier.fillMaxWidth().height(4.dp).clip(CircleShape), color = Purple, trackColor = Panel2); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("0:00", color = Muted, fontSize = 11.sp); Text("—", color = Muted, fontSize = 11.sp) }; Spacer(Modifier.height(24.dp)); Row(verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = {}) { Icon(Icons.Default.Shuffle, null, tint = Muted) }; IconButton(onClick = {}) { Icon(Icons.Default.SkipPrevious, null, tint = White, modifier = Modifier.size(34.dp)) }; IconButton(onClick = toggle, modifier = Modifier.size(72.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Pink, Purple)))) { Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = White, modifier = Modifier.size(35.dp)) }; IconButton(onClick = {}) { Icon(Icons.Default.SkipNext, null, tint = White, modifier = Modifier.size(34.dp)) }; IconButton(onClick = {}) { Icon(Icons.Default.Repeat, null, tint = Muted) } } } } }
-
-@Composable private fun Settings() { Column(Modifier.fillMaxSize().padding(20.dp).statusBarsPadding()) { Text("تنظیمات", color = White, fontSize = 29.sp, fontWeight = FontWeight.ExtraBold); Text("کنترل و اطلاعات BeatNova", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp, bottom = 22.dp)); Setting("اتصال آنلاین", if (BuildConfig.SUPABASE_URL.isBlank()) "تنظیم نشده" else "Supabase متصل", Icons.Default.Wifi); Setting("پخش‌کننده", "Media3 ExoPlayer", Icons.Default.Headphones); Setting("نسخه", "1.1.0 • Android 7+", Icons.Default.Info); Setting("ظاهر", "تم تیره BeatNova", Icons.Default.DarkMode); Spacer(Modifier.height(18.dp)); Text("BeatNova برای پخش محتوای قانونی و دارای مجوز طراحی شده است.", color = Muted, fontSize = 12.sp) } }
-@Composable private fun Setting(title: String, value: String, icon: ImageVector) { Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(18.dp)).background(Panel).padding(15.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Purple.copy(alpha = .13f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = Purple) }; Spacer(Modifier.width(13.dp)); Column { Text(title, color = White, fontWeight = FontWeight.Bold); Text(value, color = Muted, fontSize = 12.sp) } } }
-@Composable private fun InfoBanner(error: String) { Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFF211A2C)).padding(13.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.WifiOff, null, tint = Purple); Spacer(Modifier.width(10.dp)); Text(if (error == "CONFIG") "Supabase در Codemagic تنظیم نشده است." else "اتصال به سرویس موسیقی ناموفق بود.", color = Muted, fontSize = 12.sp) } }
-@Composable private fun Empty() { Box(Modifier.fillMaxWidth().height(210.dp), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Box(Modifier.size(70.dp).clip(CircleShape).background(Panel2), contentAlignment = Alignment.Center) { Icon(Icons.Default.LibraryMusic, null, tint = Purple, modifier = Modifier.size(32.dp)) }; Spacer(Modifier.height(12.dp)); Text("هنوز آهنگی اضافه نشده", color = White, fontWeight = FontWeight.Bold); Text("آهنگ‌های مجاز را در جدول songs قرار بده.", color = Muted, fontSize = 12.sp) } } }
