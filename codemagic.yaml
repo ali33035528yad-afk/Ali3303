@@ -1,0 +1,43 @@
+workflows:
+  beatnova-android:
+    name: BeatNova Android Final
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      vars:
+        PACKAGE_NAME: "com.beatnova.app"
+        SUPABASE_URL: $SUPABASE_URL
+        SUPABASE_ANON_KEY: $SUPABASE_ANON_KEY
+      java: 17
+    scripts:
+      - name: Check project
+        script: |
+          set -e
+          test -f settings.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+          echo "BeatNova project OK"
+      - name: Configure Android SDK
+        script: |
+          set -e
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" >/dev/null 2>&1 || true
+      - name: Prepare Gradle
+        script: |
+          set -e
+          cd "$CM_BUILD_DIR"
+          if [ ! -x "$CM_BUILD_DIR/gradle-8.9/bin/gradle" ]; then
+            curl -L --fail --retry 3 -o gradle.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
+            rm -rf gradle-8.9
+            unzip -q gradle.zip
+            rm -f gradle.zip
+          fi
+          "$CM_BUILD_DIR/gradle-8.9/bin/gradle" --version
+      - name: Build BeatNova
+        script: |
+          set -e
+          cd "$CM_BUILD_DIR"
+          chmod +x ./gradlew 2>/dev/null || true
+          "$CM_BUILD_DIR/gradle-8.9/bin/gradle" --no-daemon --stacktrace clean assembleRelease
+    artifacts:
+      - app/build/outputs/apk/release/*.apk
