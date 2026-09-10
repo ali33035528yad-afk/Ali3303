@@ -34,8 +34,6 @@ workflows:
               exit 1
             fi
 
-            # Copy the project into the build root but keep this repository's
-            # Codemagic configuration as the authoritative workflow file.
             find "$PROJECT_DIR" -mindepth 1 -maxdepth 1 -exec cp -a {} "$CM_BUILD_DIR/" \;
             rm -rf .beatnova_extract
           fi
@@ -50,8 +48,37 @@ workflows:
       - name: Configure Android SDK
         script: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+          # Codemagic images expose ANDROID_HOME/ANDROID_SDK_ROOT, but sdkmanager
+          # is not guaranteed to be on PATH. Locate it explicitly.
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
+            echo "ERROR: Android SDK root was not found."
+            env | grep -E 'ANDROID_(HOME|SDK_ROOT)' || true
+            exit 1
+          fi
+
+          SDKMANAGER=""
+          for candidate in \
+            "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "$SDK_ROOT/cmdline-tools/bin/sdkmanager" \
+            "$SDK_ROOT/tools/bin/sdkmanager"; do
+            if [ -x "$candidate" ]; then
+              SDKMANAGER="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager was not found under $SDK_ROOT."
+            find "$SDK_ROOT" -type f -name sdkmanager -print 2>/dev/null || true
+            exit 1
+          fi
+
+          export PATH="$(dirname "$SDKMANAGER"):$SDK_ROOT/platform-tools:$PATH"
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Prepare Gradle 8.9
         script: |
