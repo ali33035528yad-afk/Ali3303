@@ -1,5 +1,6 @@
 package com.beatnova.app
 
+import android.app.Application
 import android.content.Context
 import com.adivery.sdk.Adivery
 
@@ -21,7 +22,7 @@ object AdManager {
         adsEnabled = prefs.getBoolean(KEY_ADS_ENABLED, true)
 
         Adivery.setLoggingEnabled(BuildConfig.DEBUG)
-        Adivery.configure(appContext, BuildConfig.ADIVERY_APP_ID)
+        Adivery.configure(appContext as Application, BuildConfig.ADIVERY_APP_ID)
 
         initialized = true
     }
