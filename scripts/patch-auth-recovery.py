@@ -3,6 +3,10 @@ from pathlib import Path
 src = Path('app/src/main/java/com/beatnova/app/MainActivity.kt')
 s = src.read_text()
 s = s.replace('import android.content.pm.PackageManager\n', 'import android.content.pm.PackageManager\nimport android.net.Uri\n')
+# Normalize pasted email addresses aggressively: remove Unicode format/separator
+# characters that can be invisible in Android text fields and cause Supabase to
+# reject an otherwise valid address such as Gmail.
+s = s.replace('private fun normalizeEmail(value: String): String = value\n    .trim()\n    .replace(Regex("[\\\\u200B-\\\\u200D\\\\uFEFF]"), "")\n    .replace(Regex("\\\\s+"), "")\n    .lowercase(Locale.ROOT)', 'private fun normalizeEmail(value: String): String = value\n    .trim()\n    .replace(Regex("[\\\\p{Cf}\\\\p{Z}]"), "")\n    .replace(Regex("\\\\s+"), "")\n    .lowercase(Locale.ROOT)')
 s = s.replace('private object NotificationBus { var toggle: () -> Unit = {} }\n', 'private object NotificationBus { var toggle: () -> Unit = {} }\nprivate object AuthRecoveryBus { var url by mutableStateOf<String?>(null) }\n')
 s = s.replace('override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); createNotificationChannel(this);', 'override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); AuthRecoveryBus.url = intent?.dataString; createNotificationChannel(this);')
 s = s.replace('override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); if (intent.action == ACTION_PLAY_PAUSE) NotificationBus.toggle() }', 'override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); AuthRecoveryBus.url = intent.dataString; if (intent.action == ACTION_PLAY_PAUSE) NotificationBus.toggle() }')
