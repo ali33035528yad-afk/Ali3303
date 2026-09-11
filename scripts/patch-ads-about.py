@@ -3,6 +3,12 @@ from pathlib import Path
 P = Path('app/src/main/java/com/beatnova/app/MainActivity.kt')
 s = P.read_text(encoding='utf-8')
 
+# The source now contains the real Adivery Compose integration. Keep the CI patch
+# idempotent so it never re-inserts the old provider-neutral placeholder slots.
+if 'BeatNovaAdiveryBanner' in s:
+    print('Adivery banner integration already present; no legacy ads patch needed.')
+    raise SystemExit(0)
+
 
 def replace_once(old: str, new: str, label: str):
     global s
