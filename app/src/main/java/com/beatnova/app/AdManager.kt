@@ -1,9 +1,10 @@
 package com.beatnova.app
 
 import android.content.Context
+import com.adivery.sdk.Adivery
 
 /**
- * Ad abstraction for BeatNova. The app UI talks only to this layer so the
+ * Ad abstraction for BeatNova. The UI talks only to this layer so the
  * advertising provider can be changed later without redesigning the app.
  */
 object AdManager {
@@ -15,8 +16,13 @@ object AdManager {
 
     fun initialize(context: Context) {
         if (initialized) return
-        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val appContext = context.applicationContext
+        val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         adsEnabled = prefs.getBoolean(KEY_ADS_ENABLED, true)
+
+        Adivery.setLoggingEnabled(BuildConfig.DEBUG)
+        Adivery.configure(appContext, BuildConfig.ADIVERY_APP_ID)
+
         initialized = true
     }
 
@@ -30,11 +36,12 @@ object AdManager {
             .edit().putBoolean(KEY_ADS_ENABLED, enabled).apply()
     }
 
-    /** Provider-neutral entry points. A Tapsell/Yektanet/etc. adapter can be plugged in later. */
+    // Placement-specific UI is enabled after the corresponding Adivery placement IDs
+    // are configured. The app key alone initializes the SDK safely.
     fun showBanner() = Unit
     fun showNative() = Unit
     fun showRewarded(onReward: () -> Unit) {
-        // Until a real rewarded SDK is connected, never grant a reward implicitly.
+        // Never grant a reward until a real rewarded placement reports completion.
     }
 }
 
