@@ -82,6 +82,11 @@ jobs:
           set -euo pipefail
           python scripts/patch-ads-about.py
 
+      - name: Replace native ad placeholder with Adivery banner
+        run: |
+          set -euo pipefail
+          python scripts/patch-native-ad.py
+
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
