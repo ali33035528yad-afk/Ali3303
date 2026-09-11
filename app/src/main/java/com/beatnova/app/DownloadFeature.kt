@@ -25,11 +25,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.media3.common.MediaItem
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.NoOpCacheEvictor
@@ -53,8 +53,6 @@ private const val DOWNLOAD_CHANNEL_ID = "beatnova_downloads"
 private const val DOWNLOAD_NOTIFICATION_ID = 2002
 
 object BeatNovaDownloads {
-    private var appContext: Context? = null
-    private var databaseProvider: StandaloneDatabaseProvider? = null
     private var cache: SimpleCache? = null
     private var manager: DownloadManager? = null
     private var downloadIndex: DownloadIndex? = null
@@ -67,13 +65,11 @@ object BeatNovaDownloads {
     fun initialize(context: Context) {
         if (manager != null) return
         val application = context.applicationContext
-        appContext = application
         createDownloadChannel(application)
         val db = StandaloneDatabaseProvider(application)
         val downloadDir = File(application.filesDir, "beatnova_offline")
         val downloadCache = SimpleCache(downloadDir, NoOpCacheEvictor(), db)
         val upstream = DefaultHttpDataSource.Factory()
-        databaseProvider = db
         cache = downloadCache
         upstreamFactory = upstream
         manager = DownloadManager(application, db, downloadCache, upstream, executor)
@@ -137,7 +133,7 @@ object BeatNovaDownloads {
         return DefaultMediaSourceFactory(cacheDataSource)
     }
 
-    fun updateState(download: Download) {
+    private fun updateState(download: Download) {
         _states.value = _states.value + (download.request.id to download)
     }
 
@@ -173,26 +169,16 @@ class BeatNovaDownloadService : DownloadService(DOWNLOAD_NOTIFICATION_ID, 1000L)
         notMetRequirements: Int
     ): android.app.Notification {
         val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            2003,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val pendingIntent = PendingIntent.getActivity(this, 2003, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return DownloadNotificationHelper(this, DOWNLOAD_CHANNEL_ID).buildProgressNotification(
-            this,
-            R.drawable.ic_beatnova,
-            pendingIntent,
-            "در حال دانلود آهنگ",
-            downloads,
-            notMetRequirements
+            this, R.drawable.ic_beatnova, pendingIntent, "در حال دانلود آهنگ", downloads, notMetRequirements
         )
     }
 }
 
 @Composable
 fun BeatNovaDownloadButton(song: Song) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val states by BeatNovaDownloads.states.collectAsState()
     val state = states[song.id]?.state
     val icon = when (state) {
@@ -229,6 +215,7 @@ fun BeatNovaSongIcon(song: Song, selected: Boolean) {
 
 @Composable
 fun DownloadsScreen(songs: List<Song>, current: Song?, playing: Boolean, play: (Song) -> Unit) {
+    val context = LocalContext.current
     val states by BeatNovaDownloads.states.collectAsState()
     val completed = songs.filter { states[it.id]?.state == Download.STATE_COMPLETED }
     val active = songs.filter {
@@ -243,7 +230,7 @@ fun DownloadsScreen(songs: List<Song>, current: Song?, playing: Boolean, play: (
         if (active.isNotEmpty()) {
             Text("در حال دانلود", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
             active.forEach { song ->
-                DownloadStatusRow(song, states[song.id], onRemove = { BeatNovaDownloads.remove(songContext(), song.id) })
+                DownloadStatusRow(song, states[song.id], onRemove = { BeatNovaDownloads.remove(context, song.id) })
             }
         }
         Text("دانلود شده‌ها • ${completed.size}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
@@ -259,7 +246,7 @@ fun DownloadsScreen(songs: List<Song>, current: Song?, playing: Boolean, play: (
                 }
             } else {
                 items(completed, key = { it.id }) { song ->
-                    OfflineSongRow(song, current?.id == song.id, playing && current?.id == song.id, play, onRemove = { BeatNovaDownloads.remove(songContext(), song.id) })
+                    OfflineSongRow(song, current?.id == song.id, playing && current?.id == song.id, play, onRemove = { BeatNovaDownloads.remove(context, song.id) })
                 }
             }
         }
@@ -295,5 +282,3 @@ private fun OfflineSongRow(song: Song, selected: Boolean, playing: Boolean, play
         IconButton(onClick = onRemove) { Icon(Icons.Default.DeleteOutline, "حذف از دانلودها", tint = Color(0xFF9699A9)) }
     }
 }
-
-private fun songContext(): Context = androidx.compose.ui.platform.LocalContext.current
