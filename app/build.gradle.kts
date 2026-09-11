@@ -18,9 +18,11 @@ android {
         val fallbackSupabasePublishableKey = "sb_publishable_rEQEUxwxVSjVOsEzB9A7wA_IGH9V5X6"
         val supabaseUrl = System.getenv("SUPABASE_URL")?.takeIf { it.isNotBlank() } ?: fallbackSupabaseUrl
         val supabasePublishableKey = System.getenv("SUPABASE_ANON_KEY")?.takeIf { it.isNotBlank() } ?: fallbackSupabasePublishableKey
+        val adiveryAppId = System.getenv("ADIVERY_APP_ID")?.takeIf { it.isNotBlank() } ?: "7e69f4e1-72c2-454d-ba07-7554fed5906a"
 
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabasePublishableKey\"")
+        buildConfigField("String", "ADIVERY_APP_ID", "\"$adiveryAppId\"")
     }
     signingConfigs {
         create("release") {
@@ -62,4 +64,6 @@ dependencies {
     implementation("androidx.media3:media3-database:1.5.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("com.adivery:sdk:4.9.0")
+    implementation("com.google.android.gms:play-services-ads-identifier:18.0.1")
 }
