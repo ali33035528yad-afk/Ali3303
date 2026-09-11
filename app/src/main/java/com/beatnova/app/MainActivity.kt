@@ -9,7 +9,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.util.Patterns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -97,7 +96,7 @@ private object AuthRepository {
         val key = BuildConfig.SUPABASE_ANON_KEY
         val cleanEmail = normalizeEmail(email)
         if (BuildConfig.SUPABASE_URL.isBlank() || key.isBlank()) return@withContext Result.failure(Exception("SUPABASE_CONFIG"))
-        if (!Patterns.EMAIL_ADDRESS.matcher(cleanEmail).matches()) return@withContext Result.failure(Exception("EMAIL_INVALID"))
+        if (cleanEmail.isBlank()) return@withContext Result.failure(Exception("EMAIL_INVALID"))
         try {
             val body = JSONObject().put("email", cleanEmail).put("password", password).toString().toRequestBody(jsonType)
             val request = Request.Builder().url(url).post(body).addHeader("apikey", key).addHeader("Content-Type", "application/json").build()
@@ -158,9 +157,9 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
     Column(Modifier.fillMaxSize().background(Bg).padding(22.dp)) {
         IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "بازگشت", tint = White) }
         Spacer(Modifier.height(10.dp)); Text(if (register) "ثبت‌نام در BeatNova" else "ورود به BeatNova", color = White, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold); Text("حساب خودت را بساز و کتابخانه‌ات را شخصی‌تر کن", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 22.dp))
-        OutlinedTextField(value = email, onValueChange = { email = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ایمیل") }, leadingIcon = { Icon(Icons.Default.Email, null) }, shape = RoundedCornerShape(16.dp), isError = message == "EMAIL_INVALID")
+        OutlinedTextField(value = email, onValueChange = { email = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ایمیل") }, leadingIcon = { Icon(Icons.Default.Email, null) }, shape = RoundedCornerShape(16.dp))
         Spacer(Modifier.height(12.dp)); OutlinedTextField(value = password, onValueChange = { password = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("رمز عبور") }, leadingIcon = { Icon(Icons.Default.Lock, null) }, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp))
-        Spacer(Modifier.height(18.dp)); Button(onClick = { val cleanEmail = normalizeEmail(email); if (cleanEmail.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(cleanEmail).matches() || password.length < 6) { message = if (cleanEmail.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(cleanEmail).matches()) "ایمیل معتبر نیست؛ مثال: name@example.com" else "رمز عبور باید حداقل ۶ کاراکتر باشد."; return@Button }; email = cleanEmail; busy = true; message = null; success = false; scope.launch { val result = if (register) AuthRepository.signUp(cleanEmail, password) else AuthRepository.signIn(cleanEmail, password); busy = false; result.onSuccess { message = it; success = true }.onFailure { message = it.message ?: "خطا در احراز هویت" } } }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { if (busy) CircularProgressIndicator(modifier = Modifier.size(22.dp), color = White) else Text(if (register) "ثبت‌نام" else "ورود", fontWeight = FontWeight.Bold) }
+        Spacer(Modifier.height(18.dp)); Button(onClick = { val cleanEmail = normalizeEmail(email); if (cleanEmail.isBlank() || password.length < 6) { message = if (cleanEmail.isBlank()) "ایمیل را وارد کن." else "رمز عبور باید حداقل ۶ کاراکتر باشد."; return@Button }; email = cleanEmail; busy = true; message = null; success = false; scope.launch { val result = if (register) AuthRepository.signUp(cleanEmail, password) else AuthRepository.signIn(cleanEmail, password); busy = false; result.onSuccess { message = it; success = true }.onFailure { message = it.message ?: "خطا در احراز هویت" } } }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { if (busy) CircularProgressIndicator(modifier = Modifier.size(22.dp), color = White) else Text(if (register) "ثبت‌نام" else "ورود", fontWeight = FontWeight.Bold) }
         message?.let { Spacer(Modifier.height(14.dp)); Text(it, color = if (success) Purple else Pink, fontSize = 13.sp) }
         Spacer(Modifier.height(20.dp)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { Text(if (register) "قبلاً حساب داری؟ " else "حساب نداری؟ ", color = Muted); Text(if (register) "ورود" else "ثبت‌نام", color = Purple, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { register = !register; message = null; success = false }) }
     }
