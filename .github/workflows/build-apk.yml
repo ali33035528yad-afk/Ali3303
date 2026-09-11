@@ -21,7 +21,7 @@ env:
 
 jobs:
   build-apk:
-    name: Build Release APK
+    name: Build Release APK + AAB
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -81,29 +81,40 @@ jobs:
               print('MediaStyle call already fixed.')
           PY
 
-      - name: Build Release APK
+      - name: Build Release APK and App Bundle
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace clean assembleRelease
+          ./gradlew --no-daemon --stacktrace clean assembleRelease bundleRelease
 
-      - name: Verify APK output
+      - name: Verify APK and AAB output
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/release/app-release.apk"
+          AAB="app/build/outputs/bundle/release/app-release.aab"
           test -f "$APK"
+          test -f "$AAB"
           echo "APK: $APK"
-          ls -lh "$APK"
-          sha256sum "$APK"
+          echo "AAB: $AAB"
+          ls -lh "$APK" "$AAB"
+          sha256sum "$APK" "$AAB"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: BeatNova-release-apk-${{ github.run_number }}
           path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Play App Bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeatNova-play-aab-${{ github.run_number }}
+          path: app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 14
 
