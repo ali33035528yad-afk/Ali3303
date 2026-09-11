@@ -88,6 +88,33 @@ private object SongRepository {
     }
 }
 
+private object AuthSession {
+    private const val PREFS = "beatnova_auth"
+    private const val KEY_EMAIL = "email"
+    private const val KEY_ACCESS = "access_token"
+    private const val KEY_REFRESH = "refresh_token"
+    private var prefs: android.content.SharedPreferences? = null
+
+    fun init(context: Context) {
+        prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    }
+
+    val email: String?
+        get() = prefs?.getString(KEY_EMAIL, null)?.takeIf { it.isNotBlank() }
+
+    fun save(email: String, accessToken: String, refreshToken: String) {
+        prefs?.edit()
+            ?.putString(KEY_EMAIL, email)
+            ?.putString(KEY_ACCESS, accessToken)
+            ?.putString(KEY_REFRESH, refreshToken)
+            ?.apply()
+    }
+
+    fun clear() {
+        prefs?.edit()?.clear()?.apply()
+    }
+}
+
 private object AuthRepository {
     private val client = OkHttpClient()
     private val jsonType = "application/json".toMediaType()
@@ -117,8 +144,13 @@ private object AuthRepository {
                     return@withContext Result.failure(Exception(friendly))
                 }
                 val token = obj?.optString("access_token").orEmpty()
-                if (saveToken && token.isNotBlank()) return@withContext Result.success("ورود موفق بود")
-                if (token.isNotBlank()) return@withContext Result.success("ثبت‌نام موفق بود؛ وارد حساب شدی")
+                val refreshToken = obj?.optString("refresh_token").orEmpty()
+                val returnedEmail = obj?.optJSONObject("user")?.optString("email")?.takeIf { it.isNotBlank() } ?: cleanEmail
+                if (token.isNotBlank()) {
+                    AuthSession.save(returnedEmail, token, refreshToken)
+                    if (saveToken) return@withContext Result.success("ورود موفق بود")
+                    return@withContext Result.success("ثبت‌نام موفق بود؛ وارد حساب شدی")
+                }
                 Result.success("ثبت‌نام انجام شد؛ اگر تأیید ایمیل فعال باشد، ایمیل خود را تأیید کن.")
             }
         } catch (e: Exception) { Result.failure(e) }
@@ -127,7 +159,7 @@ private object AuthRepository {
 
 class MainActivity : ComponentActivity() {
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); AuthRecoveryBus.url = intent?.dataString; createNotificationChannel(this); if (Build.VERSION.SDK_INT >= 33 && ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS); setContent { BeatNovaApp() } }
+    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); AuthSession.init(this); AuthRecoveryBus.url = intent?.dataString; createNotificationChannel(this); if (Build.VERSION.SDK_INT >= 33 && ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS); setContent { BeatNovaApp() } }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); AuthRecoveryBus.url = intent.dataString; if (intent.action == ACTION_PLAY_PAUSE) NotificationBus.toggle() }
 }
 private object NotificationBus { var toggle: () -> Unit = {} }
@@ -139,7 +171,7 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
 @Composable private fun BeatNovaApp() {
     val recoveryUrl = AuthRecoveryBus.url
     val context = LocalContext.current; val player = remember { ExoPlayer.Builder(context).build() }; val scope = rememberCoroutineScope(); val prefs = remember { context.getSharedPreferences("beatnova_library", Context.MODE_PRIVATE) }
-    var tab by remember { mutableIntStateOf(0) }; var songs by remember { mutableStateOf(emptyList<Song>()) }; var current by remember { mutableStateOf<Song?>(null) }; var playing by remember { mutableStateOf(false) }; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }; var query by remember { mutableStateOf("") }; var showAuth by remember { mutableStateOf(false) }
+    var tab by remember { mutableIntStateOf(0) }; var loggedInEmail by remember { mutableStateOf(AuthSession.email) }; var songs by remember { mutableStateOf(emptyList<Song>()) }; var current by remember { mutableStateOf<Song?>(null) }; var playing by remember { mutableStateOf(false) }; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }; var query by remember { mutableStateOf("") }; var showAuth by remember { mutableStateOf(false) }
     var favorites by remember { mutableStateOf(prefs.getStringSet("favorites", emptySet())?.toSet() ?: emptySet()) }
     fun saveFavorites(value: Set<String>) { favorites = value; prefs.edit().putStringSet("favorites", value).apply() }; fun toggleFavorite(id: String) = saveFavorites(if (id in favorites) favorites - id else favorites + id)
     fun refresh() = scope.launch { loading = true; error = null; SongRepository.load().onSuccess { songs = it }.onFailure { error = it.message }; loading = false }
@@ -148,14 +180,14 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
     DisposableEffect(player) { val listener = object : Player.Listener { override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying; current?.let { showPlaybackNotification(context, it, isPlaying) } }; override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) { playing = false; clearPlaybackNotification(context) } } }; NotificationBus.toggle = ::togglePlay; player.addListener(listener); onDispose { NotificationBus.toggle = {}; player.removeListener(listener); player.release(); clearPlaybackNotification(context) } }
     LaunchedEffect(Unit) { refresh() }
     MaterialTheme(colorScheme = darkColorScheme(primary = Purple, background = Bg, surface = Panel, onSurface = White)) {
-        if (recoveryUrl?.startsWith("beatnova://auth/recovery") == true) { PasswordRecoveryScreen(recoveryUrl = recoveryUrl, onDone = { AuthRecoveryBus.url = null }) } else if (showAuth) { AuthScreen(onBack = { showAuth = false }) } else Column(Modifier.fillMaxSize().background(Bg)) {
-            Box(Modifier.weight(1f).fillMaxWidth()) { when (tab) { 0 -> HomeScreen(songs, loading, error, current, playing, favorites, ::refresh, ::play, ::toggleFavorite); 1 -> SearchScreen(query, { query = it }, songs.filter { query.isBlank() || it.title.contains(query, true) || it.artist.contains(query, true) }, current, favorites, ::play, ::toggleFavorite); 2 -> LibraryScreen(songs.filter { it.id in favorites }, current, favorites, ::play, ::toggleFavorite); else -> SettingsScreen { showAuth = true } } }
+        if (recoveryUrl?.startsWith("beatnova://auth/recovery") == true) { PasswordRecoveryScreen(recoveryUrl = recoveryUrl, onDone = { AuthRecoveryBus.url = null }) } else if (showAuth) { AuthScreen(onBack = { showAuth = false }, onAuthSuccess = { loggedInEmail = AuthSession.email; showAuth = false }) } else Column(Modifier.fillMaxSize().background(Bg)) {
+            Box(Modifier.weight(1f).fillMaxWidth()) { when (tab) { 0 -> HomeScreen(songs, loading, error, current, playing, favorites, ::refresh, ::play, ::toggleFavorite); 1 -> SearchScreen(query, { query = it }, songs.filter { query.isBlank() || it.title.contains(query, true) || it.artist.contains(query, true) }, current, favorites, ::play, ::toggleFavorite); 2 -> LibraryScreen(songs.filter { it.id in favorites }, current, favorites, ::play, ::toggleFavorite); else -> if (loggedInEmail.isNullOrBlank()) SettingsScreen { showAuth = true } else LoggedInSettingsScreen(loggedInEmail!!, onLogout = { AuthSession.clear(); loggedInEmail = null }) } }
             current?.let { MiniPlayer(it, playing, ::togglePlay) }; BottomBar(tab) { tab = it }
         }
     }
 }
 
-@Composable private fun AuthScreen(onBack: () -> Unit) {
+@Composable private fun AuthScreen(onBack: () -> Unit, onAuthSuccess: () -> Unit) {
     val scope = rememberCoroutineScope(); var register by remember { mutableStateOf(true) }; var email by remember { mutableStateOf("") }; var password by remember { mutableStateOf("") }; var busy by remember { mutableStateOf(false) }; var message by remember { mutableStateOf<String?>(null) }; var success by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(Bg).padding(22.dp)) {
         IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "بازگشت", tint = White) }
@@ -163,9 +195,46 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
         OutlinedTextField(value = email, onValueChange = { email = normalizeEmail(it) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ایمیل") }, leadingIcon = { Icon(Icons.Default.Email, null) }, shape = RoundedCornerShape(16.dp))
         Spacer(Modifier.height(12.dp)); OutlinedTextField(value = password, onValueChange = { password = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("رمز عبور") }, leadingIcon = { Icon(Icons.Default.Lock, null) }, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp))
         if (!register) { Spacer(Modifier.height(8.dp)); TextButton(onClick = { val clean = normalizeEmail(email); if (clean.isBlank()) { message = "ایمیل را وارد کن."; return@TextButton }; busy = true; message = null; success = false; scope.launch { AuthRecoveryRepository.send(clean).onSuccess { message = it; success = true }.onFailure { message = it.message ?: "خطا در ارسال لینک بازیابی" }; busy = false } }) { Text("فراموشی رمز عبور؟", color = Purple) } }
-        Spacer(Modifier.height(10.dp)); Button(onClick = { val cleanEmail = normalizeEmail(email); if (cleanEmail.isBlank() || password.length < 6) { message = if (cleanEmail.isBlank()) "ایمیل را وارد کن." else "رمز عبور باید حداقل ۶ کاراکتر باشد."; return@Button }; email = cleanEmail; busy = true; message = null; success = false; scope.launch { val result = if (register) AuthRepository.signUp(cleanEmail, password) else AuthRepository.signIn(cleanEmail, password); busy = false; result.onSuccess { message = it; success = true }.onFailure { message = it.message ?: "خطا در احراز هویت" } } }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { if (busy) CircularProgressIndicator(modifier = Modifier.size(22.dp), color = White) else Text(if (register) "ثبت‌نام" else "ورود", fontWeight = FontWeight.Bold) }
+        Spacer(Modifier.height(10.dp)); Button(onClick = { val cleanEmail = normalizeEmail(email); if (cleanEmail.isBlank() || password.length < 6) { message = if (cleanEmail.isBlank()) "ایمیل را وارد کن." else "رمز عبور باید حداقل ۶ کاراکتر باشد."; return@Button }; email = cleanEmail; busy = true; message = null; success = false; scope.launch { val result = if (register) AuthRepository.signUp(cleanEmail, password) else AuthRepository.signIn(cleanEmail, password); busy = false; result.onSuccess { message = it; success = true; if (it.contains("ورود موفق") || it.contains("ثبت‌نام موفق")) onAuthSuccess() }.onFailure { message = it.message ?: "خطا در احراز هویت" } } }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { if (busy) CircularProgressIndicator(modifier = Modifier.size(22.dp), color = White) else Text(if (register) "ثبت‌نام" else "ورود", fontWeight = FontWeight.Bold) }
         message?.let { Spacer(Modifier.height(14.dp)); Text(it, color = if (success) Purple else Pink, fontSize = 13.sp) }
         Spacer(Modifier.height(20.dp)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { Text(if (register) "قبلاً حساب داری؟ " else "حساب نداری؟ ", color = Muted); Text(if (register) "ورود" else "ثبت‌نام", color = Purple, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { register = !register; message = null; success = false }) }
+    }
+}
+
+@Composable private fun LoggedInSettingsScreen(email: String, onLogout: () -> Unit) {
+    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 22.dp, vertical = 18.dp)) {
+        Text("تنظیمات", color = White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(bottom = 24.dp))
+        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
+            Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(58.dp).clip(RoundedCornerShape(18.dp)).background(Purple.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Purple, modifier = Modifier.size(34.dp))
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("حساب کاربری", color = White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                        Text(email, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                Text("وضعیت: وارد شده", color = Purple, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(14.dp))
+                OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                    Icon(Icons.Default.Logout, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("خروج از حساب")
+                }
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Text("کیفیت پخش", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("بهینه برای اینترنت موبایل", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        Spacer(Modifier.height(18.dp))
+        Text("ظاهر برنامه", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("تم تیره BeatNova", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        Spacer(Modifier.height(18.dp))
+        Text("درباره BeatNova", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("نسخه 1.2.0", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
