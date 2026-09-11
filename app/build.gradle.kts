@@ -18,7 +18,7 @@ android {
         val fallbackSupabasePublishableKey = "sb_publishable_rEQEUxwxVSjVOsEzB9A7wA_IGH9V5X6"
         val supabaseUrl = System.getenv("SUPABASE_URL")?.takeIf { it.isNotBlank() } ?: fallbackSupabaseUrl
         val supabasePublishableKey = System.getenv("SUPABASE_ANON_KEY")?.takeIf { it.isNotBlank() } ?: fallbackSupabasePublishableKey
-        val adiveryAppId = System.getenv("ADIVERY_APP_ID")?.takeIf { it.isNotBlank() } ?: "7e69f4e1-72c2-454d-ba07-7554fed5906a"
+        val adiveryAppId = System.getenv("ADIVERY_APP_ID")?.takeIf { it.isNotBlank() } ?: "6b50ebd8-e979-4738-b986-a8e90172a8c2"
         val adiveryBannerPlacementId = System.getenv("ADIVERY_BANNER_PLACEMENT_ID")?.takeIf { it.isNotBlank() } ?: "129de33c-9f73-45f8-a411-b0262faff3f9"
 
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
