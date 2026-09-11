@@ -1,4 +1,5 @@
 name: BeatNova Android APK
+# Auth registration enabled in the app.
 
 on:
   push:
