@@ -1,5 +1,5 @@
 name: BeatNova Android APK
-# Auth registration, password recovery, notifications and offline downloads are enabled in the app.
+# Auth registration, password recovery, notifications, offline downloads and monetization architecture are enabled in the app.
 
 on:
   push:
@@ -77,6 +77,11 @@ jobs:
           set -euo pipefail
           python scripts/patch-offline-downloads.py
 
+      - name: Apply ads architecture and About section patch
+        run: |
+          set -euo pipefail
+          python scripts/patch-ads-about.py
+
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
@@ -147,5 +152,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml
-          git commit -m "feat: wire offline music downloads into app"
+          git commit -m "feat: wire BeatNova monetization architecture and About section"
           git push
