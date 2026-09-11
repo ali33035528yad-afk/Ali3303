@@ -11,8 +11,8 @@ android {
         applicationId = "com.beatnova.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.5.0"
+        versionCode = 9
+        versionName = "1.5.1"
 
         val fallbackSupabaseUrl = "https://fwowpkiivliyzaebzpvw.supabase.co"
         val fallbackSupabasePublishableKey = "sb_publishable_rEQEUxwxVSjVOsEzB9A7wA_IGH9V5X6"
@@ -55,6 +55,7 @@ dependencies {
     androidTestImplementation(composeBom)
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.10.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
