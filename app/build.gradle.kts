@@ -11,18 +11,20 @@ android {
         applicationId = "com.beatnova.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.4.0"
+        versionCode = 8
+        versionName = "1.5.0"
 
         val fallbackSupabaseUrl = "https://fwowpkiivliyzaebzpvw.supabase.co"
         val fallbackSupabasePublishableKey = "sb_publishable_rEQEUxwxVSjVOsEzB9A7wA_IGH9V5X6"
         val supabaseUrl = System.getenv("SUPABASE_URL")?.takeIf { it.isNotBlank() } ?: fallbackSupabaseUrl
         val supabasePublishableKey = System.getenv("SUPABASE_ANON_KEY")?.takeIf { it.isNotBlank() } ?: fallbackSupabasePublishableKey
         val adiveryAppId = System.getenv("ADIVERY_APP_ID")?.takeIf { it.isNotBlank() } ?: "7e69f4e1-72c2-454d-ba07-7554fed5906a"
+        val adiveryBannerPlacementId = System.getenv("ADIVERY_BANNER_PLACEMENT_ID")?.takeIf { it.isNotBlank() } ?: "129de33c-9f73-45f8-a411-b0262faff3f9"
 
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabasePublishableKey\"")
         buildConfigField("String", "ADIVERY_APP_ID", "\"$adiveryAppId\"")
+        buildConfigField("String", "ADIVERY_BANNER_PLACEMENT_ID", "\"$adiveryBannerPlacementId\"")
     }
     signingConfigs {
         create("release") {
