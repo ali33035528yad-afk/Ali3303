@@ -1,5 +1,5 @@
 name: BeatNova Android APK
-# Auth registration enabled in the app.
+# Auth registration and password recovery enabled in the app.
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: beatnova-apk-${{ github.ref }}
@@ -66,6 +66,11 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
           test -f "$KEYSTORE"
+
+      - name: Apply Supabase auth recovery patch
+        run: |
+          set -euo pipefail
+          python scripts/patch-auth-recovery.py
 
       - name: Fix notification compatibility
         run: |
@@ -126,3 +131,16 @@ jobs:
             app/build/outputs/apk/release/output-metadata.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Commit generated auth source changes
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml; then
+            echo "Auth recovery source is already committed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml
+          git commit -m "feat: add Supabase password recovery flow"
+          git push
