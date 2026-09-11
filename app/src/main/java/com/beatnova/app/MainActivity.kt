@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -126,15 +127,17 @@ private object AuthRepository {
 
 class MainActivity : ComponentActivity() {
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); createNotificationChannel(this); if (Build.VERSION.SDK_INT >= 33 && ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS); setContent { BeatNovaApp() } }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); if (intent.action == ACTION_PLAY_PAUSE) NotificationBus.toggle() }
+    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); AuthRecoveryBus.url = intent?.dataString; createNotificationChannel(this); if (Build.VERSION.SDK_INT >= 33 && ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS); setContent { BeatNovaApp() } }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); AuthRecoveryBus.url = intent.dataString; if (intent.action == ACTION_PLAY_PAUSE) NotificationBus.toggle() }
 }
 private object NotificationBus { var toggle: () -> Unit = {} }
+private object AuthRecoveryBus { var url by mutableStateOf<String?>(null) }
 private fun createNotificationChannel(context: Context) { if (Build.VERSION.SDK_INT >= 26) context.getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "پخش BeatNova", NotificationManager.IMPORTANCE_LOW)) }
 private fun showPlaybackNotification(context: Context, song: Song, playing: Boolean) { if (Build.VERSION.SDK_INT >= 33 && ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return; val actionIntent = PendingIntent.getActivity(context, 10, Intent(context, MainActivity::class.java).setAction(ACTION_PLAY_PAUSE), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE); val openIntent = PendingIntent.getActivity(context, 11, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE); val notification = NotificationCompat.Builder(context, CHANNEL_ID).setSmallIcon(R.drawable.ic_beatnova).setContentTitle(song.title).setContentText(song.artist).setContentIntent(openIntent).setPriority(NotificationCompat.PRIORITY_LOW).setOngoing(playing).setOnlyAlertOnce(true).setVisibility(NotificationCompat.VISIBILITY_PUBLIC).addAction(if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (playing) "مکث" else "پخش", actionIntent).build(); NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification) }
 private fun clearPlaybackNotification(context: Context) = NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
 
 @Composable private fun BeatNovaApp() {
+    val recoveryUrl = AuthRecoveryBus.url
     val context = LocalContext.current; val player = remember { ExoPlayer.Builder(context).build() }; val scope = rememberCoroutineScope(); val prefs = remember { context.getSharedPreferences("beatnova_library", Context.MODE_PRIVATE) }
     var tab by remember { mutableIntStateOf(0) }; var songs by remember { mutableStateOf(emptyList<Song>()) }; var current by remember { mutableStateOf<Song?>(null) }; var playing by remember { mutableStateOf(false) }; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }; var query by remember { mutableStateOf("") }; var showAuth by remember { mutableStateOf(false) }
     var favorites by remember { mutableStateOf(prefs.getStringSet("favorites", emptySet())?.toSet() ?: emptySet()) }
@@ -145,7 +148,7 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
     DisposableEffect(player) { val listener = object : Player.Listener { override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying; current?.let { showPlaybackNotification(context, it, isPlaying) } }; override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) { playing = false; clearPlaybackNotification(context) } } }; NotificationBus.toggle = ::togglePlay; player.addListener(listener); onDispose { NotificationBus.toggle = {}; player.removeListener(listener); player.release(); clearPlaybackNotification(context) } }
     LaunchedEffect(Unit) { refresh() }
     MaterialTheme(colorScheme = darkColorScheme(primary = Purple, background = Bg, surface = Panel, onSurface = White)) {
-        if (showAuth) { AuthScreen(onBack = { showAuth = false }) } else Column(Modifier.fillMaxSize().background(Bg)) {
+        if (recoveryUrl?.startsWith("beatnova://auth/recovery") == true) { PasswordRecoveryScreen(recoveryUrl = recoveryUrl, onDone = { AuthRecoveryBus.url = null }) } else if (showAuth) { AuthScreen(onBack = { showAuth = false }) } else Column(Modifier.fillMaxSize().background(Bg)) {
             Box(Modifier.weight(1f).fillMaxWidth()) { when (tab) { 0 -> HomeScreen(songs, loading, error, current, playing, favorites, ::refresh, ::play, ::toggleFavorite); 1 -> SearchScreen(query, { query = it }, songs.filter { query.isBlank() || it.title.contains(query, true) || it.artist.contains(query, true) }, current, favorites, ::play, ::toggleFavorite); 2 -> LibraryScreen(songs.filter { it.id in favorites }, current, favorites, ::play, ::toggleFavorite); else -> SettingsScreen { showAuth = true } } }
             current?.let { MiniPlayer(it, playing, ::togglePlay) }; BottomBar(tab) { tab = it }
         }
@@ -159,9 +162,23 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
         Spacer(Modifier.height(10.dp)); Text(if (register) "ثبت‌نام در BeatNova" else "ورود به BeatNova", color = White, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold); Text("حساب خودت را بساز و کتابخانه‌ات را شخصی‌تر کن", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 22.dp))
         OutlinedTextField(value = email, onValueChange = { email = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ایمیل") }, leadingIcon = { Icon(Icons.Default.Email, null) }, shape = RoundedCornerShape(16.dp))
         Spacer(Modifier.height(12.dp)); OutlinedTextField(value = password, onValueChange = { password = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("رمز عبور") }, leadingIcon = { Icon(Icons.Default.Lock, null) }, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp))
-        Spacer(Modifier.height(18.dp)); Button(onClick = { val cleanEmail = normalizeEmail(email); if (cleanEmail.isBlank() || password.length < 6) { message = if (cleanEmail.isBlank()) "ایمیل را وارد کن." else "رمز عبور باید حداقل ۶ کاراکتر باشد."; return@Button }; email = cleanEmail; busy = true; message = null; success = false; scope.launch { val result = if (register) AuthRepository.signUp(cleanEmail, password) else AuthRepository.signIn(cleanEmail, password); busy = false; result.onSuccess { message = it; success = true }.onFailure { message = it.message ?: "خطا در احراز هویت" } } }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { if (busy) CircularProgressIndicator(modifier = Modifier.size(22.dp), color = White) else Text(if (register) "ثبت‌نام" else "ورود", fontWeight = FontWeight.Bold) }
+        if (!register) { Spacer(Modifier.height(8.dp)); TextButton(onClick = { val clean = normalizeEmail(email); if (clean.isBlank()) { message = "ایمیل را وارد کن."; return@TextButton }; busy = true; message = null; success = false; scope.launch { AuthRecoveryRepository.send(clean).onSuccess { message = it; success = true }.onFailure { message = it.message ?: "خطا در ارسال لینک بازیابی" }; busy = false } }) { Text("فراموشی رمز عبور؟", color = Purple) } }
+        Spacer(Modifier.height(10.dp)); Button(onClick = { val cleanEmail = normalizeEmail(email); if (cleanEmail.isBlank() || password.length < 6) { message = if (cleanEmail.isBlank()) "ایمیل را وارد کن." else "رمز عبور باید حداقل ۶ کاراکتر باشد."; return@Button }; email = cleanEmail; busy = true; message = null; success = false; scope.launch { val result = if (register) AuthRepository.signUp(cleanEmail, password) else AuthRepository.signIn(cleanEmail, password); busy = false; result.onSuccess { message = it; success = true }.onFailure { message = it.message ?: "خطا در احراز هویت" } } }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { if (busy) CircularProgressIndicator(modifier = Modifier.size(22.dp), color = White) else Text(if (register) "ثبت‌نام" else "ورود", fontWeight = FontWeight.Bold) }
         message?.let { Spacer(Modifier.height(14.dp)); Text(it, color = if (success) Purple else Pink, fontSize = 13.sp) }
         Spacer(Modifier.height(20.dp)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { Text(if (register) "قبلاً حساب داری؟ " else "حساب نداری؟ ", color = Muted); Text(if (register) "ورود" else "ثبت‌نام", color = Purple, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { register = !register; message = null; success = false }) }
+    }
+}
+
+@Composable private fun PasswordRecoveryScreen(recoveryUrl: String, onDone: () -> Unit) {
+    val token = remember(recoveryUrl) { Uri.parse(recoveryUrl).fragment?.split("&")?.mapNotNull { part -> val kv = part.split("=", limit = 2); if (kv.size == 2) kv[0] to Uri.decode(kv[1]) else null }?.toMap()?.get("access_token").orEmpty() }
+    val scope = rememberCoroutineScope(); var password by remember { mutableStateOf("") }; var confirm by remember { mutableStateOf("") }; var busy by remember { mutableStateOf(false) }; var message by remember { mutableStateOf<String?>(null) }; var success by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().background(Bg).padding(22.dp)) {
+        Text("تغییر رمز عبور", color = White, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold); Spacer(Modifier.height(8.dp)); Text("رمز جدید را برای حساب BeatNova انتخاب کن.", color = Muted)
+        Spacer(Modifier.height(22.dp)); OutlinedTextField(value = password, onValueChange = { password = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("رمز جدید") }, visualTransformation = PasswordVisualTransformation())
+        Spacer(Modifier.height(12.dp)); OutlinedTextField(value = confirm, onValueChange = { confirm = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("تکرار رمز جدید") }, visualTransformation = PasswordVisualTransformation())
+        Spacer(Modifier.height(18.dp)); Button(onClick = { when { token.isBlank() -> message = "لینک بازیابی نامعتبر یا منقضی شده است."; password.length < 6 -> message = "رمز عبور باید حداقل ۶ کاراکتر باشد."; password != confirm -> message = "تکرار رمز با رمز جدید یکسان نیست."; else -> { busy = true; message = null; scope.launch { AuthRecoveryRepository.update(token, password).onSuccess { message = it; success = true }.onFailure { message = it.message ?: "تغییر رمز انجام نشد" }; busy = false } } } }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp)) { if (busy) CircularProgressIndicator(modifier = Modifier.size(22.dp), color = White) else Text("ذخیره رمز جدید") }
+        message?.let { Spacer(Modifier.height(14.dp)); Text(it, color = if (success) Purple else Pink) }
+        if (success) { Spacer(Modifier.height(14.dp)); TextButton(onClick = onDone) { Text("بازگشت به ورود", color = Purple) } }
     }
 }
 
