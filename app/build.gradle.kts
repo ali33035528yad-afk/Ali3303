@@ -11,10 +11,14 @@ android {
         applicationId = "com.beatnova.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.3.0"
-        val supabaseUrl = System.getenv("SUPABASE_URL") ?: "https://fwowpkiivliyzaebzpvw.supabase.co"
-        val supabasePublishableKey = System.getenv("SUPABASE_ANON_KEY") ?: "sb_publishable_rEQEUxwxVSjVOsEzB9A7wA_IGH9V5X6"
+        versionCode = 7
+        versionName = "1.4.0"
+
+        val fallbackSupabaseUrl = "https://fwowpkiivliyzaebzpvw.supabase.co"
+        val fallbackSupabasePublishableKey = "sb_publishable_rEQEUxwxVSjVOsEzB9A7wA_IGH9V5X6"
+        val supabaseUrl = System.getenv("SUPABASE_URL")?.takeIf { it.isNotBlank() } ?: fallbackSupabaseUrl
+        val supabasePublishableKey = System.getenv("SUPABASE_ANON_KEY")?.takeIf { it.isNotBlank() } ?: fallbackSupabasePublishableKey
+
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabasePublishableKey\"")
     }
