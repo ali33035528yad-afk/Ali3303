@@ -12,6 +12,9 @@
         android:roundIcon="@drawable/ic_beatnova"
         android:theme="@style/Theme.BeatNova"
         android:usesCleartextTraffic="false">
+        <meta-data
+            android:name="com.adivery.appId"
+            android:value="6b50ebd8-e979-4738-b986-a8e90172a8c2" />
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
