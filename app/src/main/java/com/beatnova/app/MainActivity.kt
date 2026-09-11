@@ -267,11 +267,10 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
     val context = LocalContext.current
     if (!AdManager.shouldShowAds(context)) return
     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Campaign, null, tint = Purple, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) { Text("تبلیغ", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text("جایگاه Banner آماده اتصال به شبکه تبلیغاتی", color = White, fontSize = 12.sp) }
-        }
+        BeatNovaAdiveryBanner(
+            placementId = BuildConfig.ADIVERY_BANNER_PLACEMENT_ID,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+        )
     }
 }
 
@@ -282,7 +281,7 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Campaign, null, tint = Purple, modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) { Text("تبلیغ", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text("جایگاه Native آماده اتصال به شبکه تبلیغاتی", color = White, fontSize = 12.sp) }
+            Column(Modifier.weight(1f)) { Text("تبلیغ", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text("جایگاه Native بعد از ساخت Placement فعال می‌شود", color = White, fontSize = 12.sp) }
         }
     }
 }
