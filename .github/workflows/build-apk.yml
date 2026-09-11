@@ -1,5 +1,5 @@
 name: BeatNova Android APK
-# Auth registration and password recovery enabled in the app.
+# Auth registration, password recovery, notifications and offline downloads are enabled in the app.
 
 on:
   push:
@@ -72,6 +72,11 @@ jobs:
           set -euo pipefail
           python scripts/patch-auth-recovery.py
 
+      - name: Apply offline downloads and library patch
+        run: |
+          set -euo pipefail
+          python scripts/patch-offline-downloads.py
+
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
@@ -132,15 +137,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Commit generated auth source changes
+      - name: Commit generated Android source changes
         run: |
           set -euo pipefail
           if git diff --quiet -- app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml; then
-            echo "Auth recovery source is already committed."
+            echo "Generated Android source is already committed."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml
-          git commit -m "feat: add Supabase password recovery flow"
+          git commit -m "feat: wire offline music downloads into app"
           git push
