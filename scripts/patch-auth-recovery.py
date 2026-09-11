@@ -7,44 +7,9 @@ s = s.replace('private object NotificationBus { var toggle: () -> Unit = {} }\n'
 s = s.replace('override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); createNotificationChannel(this);', 'override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); AuthRecoveryBus.url = intent?.dataString; createNotificationChannel(this);')
 s = s.replace('override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); if (intent.action == ACTION_PLAY_PAUSE) NotificationBus.toggle() }', 'override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); AuthRecoveryBus.url = intent.dataString; if (intent.action == ACTION_PLAY_PAUSE) NotificationBus.toggle() }')
 needle = 'class MainActivity : ComponentActivity {'
-methods = '''private object AuthRecoveryRepository {
-    private val client = OkHttpClient()
-    private val jsonType = "application/json".toMediaType()
-    suspend fun send(email: String): Result<String> = withContext(Dispatchers.IO) {
-        val base = BuildConfig.SUPABASE_URL.trimEnd('/')
-        val key = BuildConfig.SUPABASE_ANON_KEY
-        val clean = normalizeEmail(email)
-        if (base.isBlank() || key.isBlank()) return@withContext Result.failure(Exception("SUPABASE_CONFIG"))
-        if (clean.isBlank()) return@withContext Result.failure(Exception("ایمیل را وارد کن."))
-        try {
-            val body = JSONObject().put("email", clean).put("redirect_to", "beatnova://auth/recovery").toString().toRequestBody(jsonType)
-            val request = Request.Builder().url("$base/auth/v1/recover").post(body).addHeader("apikey", key).addHeader("Content-Type", "application/json").build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    val obj = runCatching { JSONObject(response.body?.string().orEmpty()) }.getOrNull()
-                    return@withContext Result.failure(Exception(obj?.optString("msg")?.takeIf { it.isNotBlank() } ?: "AUTH_HTTP_${response.code}"))
-                }
-                Result.success("لینک بازیابی رمز به ایمیل شما ارسال شد.")
-            }
-        } catch (e: Exception) { Result.failure(e) }
-    }
-    suspend fun update(accessToken: String, password: String): Result<String> = withContext(Dispatchers.IO) {
-        val base = BuildConfig.SUPABASE_URL.trimEnd('/')
-        val key = BuildConfig.SUPABASE_ANON_KEY
-        if (base.isBlank() || key.isBlank()) return@withContext Result.failure(Exception("SUPABASE_CONFIG"))
-        try {
-            val body = JSONObject().put("password", password).toString().toRequestBody(jsonType)
-            val request = Request.Builder().url("$base/auth/v1/user").patch(body).addHeader("apikey", key).addHeader("Authorization", "Bearer $accessToken").addHeader("Content-Type", "application/json").build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext Result.failure(Exception("AUTH_HTTP_${response.code}"))
-                Result.success("رمز عبور با موفقیت تغییر کرد.")
-            }
-        } catch (e: Exception) { Result.failure(e) }
-    }
-}
+# AuthRecoveryRepository lives in its own Kotlin source file. Keeping it out of this
+# generated patch prevents duplicate declarations and makes CI deterministic.
 
-'''
-s = s.replace(needle, methods + needle)
 s = s.replace('@Composable private fun BeatNovaApp() {', '@Composable private fun BeatNovaApp() {\n    val recoveryUrl = AuthRecoveryBus.url')
 s = s.replace('if (showAuth) { AuthScreen(onBack = { showAuth = false }) } else Column', 'if (recoveryUrl?.startsWith("beatnova://auth/recovery") == true) { PasswordRecoveryScreen(recoveryUrl = recoveryUrl, onDone = { AuthRecoveryBus.url = null }) } else if (showAuth) { AuthScreen(onBack = { showAuth = false }) } else Column')
 start = s.index('@Composable private fun AuthScreen(onBack: () -> Unit) {')
