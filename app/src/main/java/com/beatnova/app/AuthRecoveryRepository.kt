@@ -9,7 +9,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.Locale
 
-private object AuthRecoveryRepository {
+object AuthRecoveryRepository {
     private val client = OkHttpClient()
     private val jsonType = "application/json".toMediaType()
 
