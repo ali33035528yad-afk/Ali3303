@@ -275,15 +275,9 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
 }
 
 @Composable private fun BeatNovaNativeAdSlot() {
-    val context = LocalContext.current
-    if (!AdManager.shouldShowAds(context)) return
-    Card(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 7.dp), shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Campaign, null, tint = Purple, modifier = Modifier.size(24.dp))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) { Text("تبلیغ", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text("جایگاه Native بعد از ساخت Placement فعال می‌شود", color = White, fontSize = 12.sp) }
-        }
-    }
+    // Until a dedicated Native placement is configured in Adivery, reuse the
+    // verified Banner placement here instead of showing a fake placeholder.
+    BeatNovaBannerAdSlot()
 }
 
 @Composable private fun SettingsScreen(onAccount: () -> Unit) { Column(Modifier.fillMaxSize().padding(22.dp)) { Text("تنظیمات", color = White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold); Spacer(Modifier.height(20.dp)); Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(20.dp)).background(Panel).clickable { onAccount() }.padding(17.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(Purple.copy(alpha = .14f)), contentAlignment = Alignment.Center) { Icon(Icons.Default.PersonAdd, null, tint = Purple, modifier = Modifier.size(26.dp)) }; Spacer(Modifier.width(14.dp)); Column(Modifier.weight(1f)) { Text("ثبت‌نام / ورود", color = White, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text("ساخت حساب کاربری با Supabase", color = Muted, fontSize = 11.sp) }; Icon(Icons.Default.ChevronLeft, null, tint = Muted) }; Spacer(Modifier.height(8.dp)); SettingRow("کیفیت پخش", "بهینه برای اینترنت موبایل", Icons.Default.HighQuality); SettingRow("ظاهر برنامه", "تم تیره BeatNova", Icons.Default.DarkMode); SettingRow("درباره BeatNova", "سازنده: علی ساحلی • نسخه ${BuildConfig.VERSION_NAME}", Icons.Default.Info) } }
