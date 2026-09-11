@@ -141,7 +141,7 @@ object BeatNovaDownloads {
         val index = downloadIndex ?: return
         executor.execute {
             runCatching {
-                val cursor = index.getDownloads(intArrayOf())
+                val cursor = index.getDownloads()
                 val result = mutableMapOf<String, Download>()
                 while (cursor.moveToNext()) {
                     val download = cursor.download
@@ -161,13 +161,9 @@ object BeatNovaDownloads {
 
 class BeatNovaDownloadService : DownloadService(DOWNLOAD_NOTIFICATION_ID, 1000L) {
     override fun getDownloadManager(): DownloadManager = BeatNovaDownloads.getManager(this)
-
     override fun getScheduler(): androidx.media3.exoplayer.scheduler.Scheduler? = null
 
-    override fun getForegroundNotification(
-        downloads: MutableList<Download>,
-        notMetRequirements: Int
-    ): android.app.Notification {
+    override fun getForegroundNotification(downloads: MutableList<Download>, notMetRequirements: Int): android.app.Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 2003, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return DownloadNotificationHelper(this, DOWNLOAD_CHANNEL_ID).buildProgressNotification(
@@ -200,15 +196,7 @@ fun BeatNovaDownloadButton(song: Song) {
 
 @Composable
 fun BeatNovaSongIcon(song: Song, selected: Boolean) {
-    val icons = listOf<ImageVector>(
-        Icons.Default.MusicNote,
-        Icons.Default.Album,
-        Icons.Default.GraphicEq,
-        Icons.Default.Headphones,
-        Icons.Default.QueueMusic,
-        Icons.Default.LibraryMusic,
-        Icons.Default.Radio
-    )
+    val icons = listOf<ImageVector>(Icons.Default.MusicNote, Icons.Default.Album, Icons.Default.GraphicEq, Icons.Default.Headphones, Icons.Default.QueueMusic, Icons.Default.LibraryMusic, Icons.Default.Radio)
     val index = kotlin.math.abs(song.title.hashCode() + song.artist.hashCode()) % icons.size
     Icon(if (selected) Icons.Default.GraphicEq else icons[index], null, tint = Color.White, modifier = Modifier.size(25.dp))
 }
@@ -218,20 +206,13 @@ fun DownloadsScreen(songs: List<Song>, current: Song?, playing: Boolean, play: (
     val context = LocalContext.current
     val states by BeatNovaDownloads.states.collectAsState()
     val completed = songs.filter { states[it.id]?.state == Download.STATE_COMPLETED }
-    val active = songs.filter {
-        when (states[it.id]?.state) {
-            Download.STATE_DOWNLOADING, Download.STATE_QUEUED, Download.STATE_FAILED, Download.STATE_STOPPED -> true
-            else -> false
-        }
-    }
+    val active = songs.filter { states[it.id]?.state in setOf(Download.STATE_DOWNLOADING, Download.STATE_QUEUED, Download.STATE_FAILED, Download.STATE_STOPPED) }
     Column(Modifier.fillMaxSize().background(Color(0xFF08090F)).padding(top = 22.dp)) {
         Text("کتابخانه دانلود", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 20.dp))
         Text("آهنگ‌های ذخیره‌شده برای پخش آفلاین", color = Color(0xFF9699A9), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp))
         if (active.isNotEmpty()) {
             Text("در حال دانلود", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
-            active.forEach { song ->
-                DownloadStatusRow(song, states[song.id], onRemove = { BeatNovaDownloads.remove(context, song.id) })
-            }
+            active.forEach { song -> DownloadStatusRow(song, states[song.id], onRemove = { BeatNovaDownloads.remove(context, song.id) }) }
         }
         Text("دانلود شده‌ها • ${completed.size}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -245,9 +226,7 @@ fun DownloadsScreen(songs: List<Song>, current: Song?, playing: Boolean, play: (
                     }
                 }
             } else {
-                items(completed, key = { it.id }) { song ->
-                    OfflineSongRow(song, current?.id == song.id, playing && current?.id == song.id, play, onRemove = { BeatNovaDownloads.remove(context, song.id) })
-                }
+                items(completed, key = { it.id }) { song -> OfflineSongRow(song, current?.id == song.id, playing && current?.id == song.id, play, onRemove = { BeatNovaDownloads.remove(context, song.id) }) }
             }
         }
     }
