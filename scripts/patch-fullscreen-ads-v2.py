@@ -2,7 +2,6 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 
-# Configure the exact Adivery placements supplied for BeatNova.
 gradle = root / "app/build.gradle.kts"
 s = gradle.read_text()
 if "ADIVERY_INTERSTITIAL_PLACEMENT_ID" not in s:
@@ -14,20 +13,30 @@ if "ADIVERY_INTERSTITIAL_PLACEMENT_ID" not in s:
     s = s.replace(old2, new2)
     gradle.write_text(s)
 
-# Add the ad controllers only once, preserving all existing player/auth/download UI.
 ad = root / "app/src/main/java/com/beatnova/app/AdManager.kt"
 s = ad.read_text()
-if "AppOpenAdLifecycle" not in s:
+if "playAfterInterstitial" not in s:
     start = s.index("object AdManager {")
     end = s.index("\nobject PremiumGate", start)
     replacement = '''object AdManager {
     private const val PREFS = "beatnova_monetization"
     private const val KEY_ADS_ENABLED = "ads_enabled"
-    private const val KEY_INTERSTITIAL_COUNT = "interstitial_count"
-    private const val KEY_LAST_INTERSTITIAL = "last_interstitial"
 
     private var initialized = false
     private var adsEnabled = true
+    private var pendingAfterInterstitial: (() -> Unit)? = null
+
+    private val interstitialListener = object : com.adivery.sdk.AdiveryListener() {
+        override fun onInterstitialAdLoaded(placementId: String) = Unit
+        override fun onInterstitialAdShown(placementId: String) = Unit
+        override fun onInterstitialAdClicked(placementId: String) = Unit
+        override fun onInterstitialAdClosed(placementId: String) {
+            val action = pendingAfterInterstitial
+            pendingAfterInterstitial = null
+            action?.invoke()
+        }
+        override fun log(placementId: String, message: String) = Unit
+    }
 
     fun initialize(context: Context) {
         if (initialized) return
@@ -37,8 +46,11 @@ if "AppOpenAdLifecycle" not in s:
         Adivery.setLoggingEnabled(BuildConfig.DEBUG)
         val application = appContext as Application
         Adivery.configure(application, BuildConfig.ADIVERY_APP_ID)
-        if (BuildConfig.ADIVERY_INTERSTITIAL_PLACEMENT_ID.isNotBlank()) {
-            Adivery.prepareInterstitialAd(appContext, BuildConfig.ADIVERY_INTERSTITIAL_PLACEMENT_ID)
+
+        val interstitial = BuildConfig.ADIVERY_INTERSTITIAL_PLACEMENT_ID
+        if (interstitial.isNotBlank()) {
+            Adivery.addPlacementListener(interstitial, interstitialListener)
+            Adivery.prepareInterstitialAd(appContext, interstitial)
         }
         if (BuildConfig.ADIVERY_APP_OPEN_PLACEMENT_ID.isNotBlank()) {
             application.registerActivityLifecycleCallbacks(AppOpenAdLifecycle())
@@ -55,22 +67,20 @@ if "AppOpenAdLifecycle" not in s:
             .edit().putBoolean(KEY_ADS_ENABLED, enabled).apply()
     }
 
-    fun maybeShowInterstitial(context: Context) {
-        if (!shouldShowAds(context)) return
-        val placement = BuildConfig.ADIVERY_INTERSTITIAL_PLACEMENT_ID
-        if (placement.isBlank() || context !is android.app.Activity) return
-        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val count = prefs.getInt(KEY_INTERSTITIAL_COUNT, 0) + 1
-        val last = prefs.getLong(KEY_LAST_INTERSTITIAL, 0L)
-        val now = System.currentTimeMillis()
-        if (count < 4 || now - last < 120_000L) {
-            prefs.edit().putInt(KEY_INTERSTITIAL_COUNT, count).apply()
+    /** Runs [afterAd] only after the interstitial closes. If no ad is ready, playback starts normally. */
+    fun playAfterInterstitial(context: Context, afterAd: () -> Unit) {
+        if (!shouldShowAds(context)) {
+            afterAd()
             return
         }
-        if (Adivery.isLoaded(placement)) {
-            prefs.edit().putInt(KEY_INTERSTITIAL_COUNT, 0).putLong(KEY_LAST_INTERSTITIAL, now).apply()
-            Adivery.showAd(placement)
+        val activity = context as? android.app.Activity
+        val placement = BuildConfig.ADIVERY_INTERSTITIAL_PLACEMENT_ID
+        if (activity == null || placement.isBlank() || !Adivery.isLoaded(placement)) {
+            afterAd()
+            return
         }
+        pendingAfterInterstitial = afterAd
+        Adivery.showAd(placement)
     }
 
     fun showBanner() = Unit
@@ -117,10 +127,7 @@ private class AppOpenAdLifecycle : Application.ActivityLifecycleCallbacks {
     override fun onActivityResumed(activity: android.app.Activity) = Unit
     override fun onActivityPaused(activity: android.app.Activity) = Unit
     override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: Bundle) = Unit
-    override fun onActivityDestroyed(activity: android.app.Activity) {
-        val placement = BuildConfig.ADIVERY_APP_OPEN_PLACEMENT_ID
-        if (placement.isNotBlank()) Adivery.removePlacementListener(placement)
-    }
+    override fun onActivityDestroyed(activity: android.app.Activity) = Unit
 }
 '''
     s = s[:start] + replacement + s[end:]
@@ -128,13 +135,16 @@ private class AppOpenAdLifecycle : Application.ActivityLifecycleCallbacks {
         s = s.replace('import android.content.Context\n', 'import android.content.Context\nimport android.os.Bundle\n')
     ad.write_text(s)
 
-# Trigger the interstitial from the existing song-start path, without changing playback behavior.
 main = root / "app/src/main/java/com/beatnova/app/MainActivity.kt"
 s = main.read_text()
-needle = '    fun play(song: Song) { current = song; player.setMediaItem(MediaItem.fromUri(song.audioUrl)); player.prepare(); player.play(); showFullPlayer = true; showPlaybackNotification(context, song, true) }'
-replacement = '    fun play(song: Song) { current = song; player.setMediaItem(MediaItem.fromUri(song.audioUrl)); player.prepare(); player.play(); showFullPlayer = true; showPlaybackNotification(context, song, true); AdManager.maybeShowInterstitial(context) }'
-if needle in s and 'AdManager.maybeShowInterstitial(context)' not in s:
-    s = s.replace(needle, replacement)
+old = '    fun play(song: Song) { current = song; player.setMediaItem(MediaItem.fromUri(song.audioUrl)); player.prepare(); player.play(); showFullPlayer = true; showPlaybackNotification(context, song, true); AdManager.maybeShowInterstitial(context) }'
+new = '    fun play(song: Song) { AdManager.playAfterInterstitial(context) { current = song; player.setMediaItem(MediaItem.fromUri(song.audioUrl)); player.prepare(); player.play(); showFullPlayer = true; showPlaybackNotification(context, song, true) } }'
+if old in s:
+    s = s.replace(old, new)
+else:
+    old2 = '    fun play(song: Song) { current = song; player.setMediaItem(MediaItem.fromUri(song.audioUrl)); player.prepare(); player.play(); showFullPlayer = true; showPlaybackNotification(context, song, true) }'
+    if old2 in s:
+        s = s.replace(old2, new)
 main.write_text(s)
 
-print("Adivery interstitial and app-open placements configured safely.")
+print("Interstitial now blocks playback until the ad closes; playback remains immediate when no ad is ready.")
