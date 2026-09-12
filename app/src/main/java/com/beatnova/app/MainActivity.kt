@@ -171,18 +171,91 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
 @Composable private fun BeatNovaApp() {
     val recoveryUrl = AuthRecoveryBus.url
     val context = LocalContext.current; AdManager.initialize(context); val player = remember { ExoPlayer.Builder(context).setMediaSourceFactory(BeatNovaDownloads.mediaSourceFactory(context)).build() }; val scope = rememberCoroutineScope(); val prefs = remember { context.getSharedPreferences("beatnova_library", Context.MODE_PRIVATE) }
-    var tab by remember { mutableIntStateOf(0) }; var loggedInEmail by remember { mutableStateOf(AuthSession.email) }; var songs by remember { mutableStateOf(emptyList<Song>()) }; var current by remember { mutableStateOf<Song?>(null) }; var playing by remember { mutableStateOf(false) }; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }; var query by remember { mutableStateOf("") }; var showAuth by remember { mutableStateOf(false) }
+    var tab by remember { mutableIntStateOf(0) }; var loggedInEmail by remember { mutableStateOf(AuthSession.email) }; var songs by remember { mutableStateOf(emptyList<Song>()) }; var current by remember { mutableStateOf<Song?>(null) }; var playing by remember { mutableStateOf(false) }; var showFullPlayer by remember { mutableStateOf(false) }; var playerProgress by remember { mutableFloatStateOf(0f) }; var playerDuration by remember { mutableLongStateOf(0L) }; var loading by remember { mutableStateOf(true) }; var error by remember { mutableStateOf<String?>(null) }; var query by remember { mutableStateOf("") }; var showAuth by remember { mutableStateOf(false) }
     var favorites by remember { mutableStateOf(prefs.getStringSet("favorites", emptySet())?.toSet() ?: emptySet()) }
     fun saveFavorites(value: Set<String>) { favorites = value; prefs.edit().putStringSet("favorites", value).apply() }; fun toggleFavorite(id: String) = saveFavorites(if (id in favorites) favorites - id else favorites + id)
     fun refresh() = scope.launch { loading = true; error = null; SongRepository.load().onSuccess { songs = it }.onFailure { error = it.message }; loading = false }
-    fun play(song: Song) { current = song; player.setMediaItem(MediaItem.fromUri(song.audioUrl)); player.prepare(); player.play(); showPlaybackNotification(context, song, true) }
+    fun play(song: Song) { current = song; player.setMediaItem(MediaItem.fromUri(song.audioUrl)); player.prepare(); player.play(); showFullPlayer = true; showPlaybackNotification(context, song, true) }
     fun togglePlay() { if (player.isPlaying) player.pause() else if (current != null) player.play(); current?.let { showPlaybackNotification(context, it, player.isPlaying) } }
     DisposableEffect(player) { val listener = object : Player.Listener { override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying; current?.let { showPlaybackNotification(context, it, isPlaying) } }; override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) { playing = false; clearPlaybackNotification(context) } } }; NotificationBus.toggle = ::togglePlay; player.addListener(listener); onDispose { NotificationBus.toggle = {}; player.removeListener(listener); player.release(); clearPlaybackNotification(context) } }
+    LaunchedEffect(showFullPlayer, current) {
+        while (showFullPlayer && current != null) {
+            playerDuration = player.duration.takeIf { it > 0 } ?: 0L
+            playerProgress = if (playerDuration > 0) (player.currentPosition.toFloat() / playerDuration).coerceIn(0f, 1f) else 0f
+            kotlinx.coroutines.delay(500)
+        }
+    }
     LaunchedEffect(Unit) { refresh() }
     MaterialTheme(colorScheme = darkColorScheme(primary = Purple, background = Bg, surface = Panel, onSurface = White)) {
-        if (recoveryUrl?.startsWith("beatnova://auth/recovery") == true) { PasswordRecoveryScreen(recoveryUrl = recoveryUrl, onDone = { AuthRecoveryBus.url = null }) } else if (showAuth) { AuthScreen(onBack = { showAuth = false }, onAuthSuccess = { loggedInEmail = AuthSession.email; showAuth = false }) } else Column(Modifier.fillMaxSize().background(Bg)) {
+        if (recoveryUrl?.startsWith("beatnova://auth/recovery") == true) {
+            PasswordRecoveryScreen(recoveryUrl = recoveryUrl, onDone = { AuthRecoveryBus.url = null })
+        } else if (showAuth) {
+            AuthScreen(onBack = { showAuth = false }, onAuthSuccess = { loggedInEmail = AuthSession.email; showAuth = false })
+        } else if (showFullPlayer && current != null) {
+            FullPlayerScreen(song = current!!, playing = playing, progress = playerProgress, duration = playerDuration,
+                isFavorite = current!!.id in favorites, onBack = { showFullPlayer = false }, onToggle = ::togglePlay,
+                onFavorite = { toggleFavorite(current!!.id) },
+                onSeek = { fraction -> if (playerDuration > 0) player.seekTo((playerDuration * fraction).toLong()) },
+                onNext = { val i = songs.indexOfFirst { it.id == current!!.id }; if (i >= 0 && i + 1 < songs.size) play(songs[i + 1]) },
+                onPrevious = { val i = songs.indexOfFirst { it.id == current!!.id }; if (i > 0) play(songs[i - 1]) })
+        } else Column(Modifier.fillMaxSize().background(Bg)) {
             Box(Modifier.weight(1f).fillMaxWidth()) { when (tab) { 0 -> HomeScreen(songs, loading, error, current, playing, favorites, ::refresh, ::play, ::toggleFavorite); 1 -> SearchScreen(query, { query = it }, songs.filter { query.isBlank() || it.title.contains(query, true) || it.artist.contains(query, true) }, current, favorites, ::play, ::toggleFavorite); 2 -> LibraryScreen(songs.filter { it.id in favorites }, current, favorites, ::play, ::toggleFavorite); 3 -> DownloadsScreen(songs, current, playing, ::play); else -> if (loggedInEmail.isNullOrBlank()) SettingsScreen { showAuth = true } else LoggedInSettingsScreen(loggedInEmail!!, onLogout = { AuthSession.clear(); loggedInEmail = null }) } }
-            current?.let { MiniPlayer(it, playing, ::togglePlay) }; BottomBar(tab) { tab = it }
+            current?.let { MiniPlayer(it, playing, ::togglePlay, open = { showFullPlayer = true }) }; BottomBar(tab) { tab = it }
+        }
+    }
+}
+
+@Composable private fun FullPlayerScreen(
+    song: Song,
+    playing: Boolean,
+    progress: Float,
+    duration: Long,
+    isFavorite: Boolean,
+    onBack: () -> Unit,
+    onToggle: () -> Unit,
+    onFavorite: () -> Unit,
+    onSeek: (Float) -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+) {
+    val minutes = { ms: Long -> "${ms / 60000}:${((ms / 1000) % 60).toString().padStart(2, '0')}" }
+    Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF1B1028), Bg, Color(0xFF090A12)))).padding(horizontal = 20.dp, vertical = 14.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.KeyboardArrowDown, "بستن", tint = White) }
+            Text("در حال پخش", color = White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            IconButton(onClick = onFavorite) { Icon(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "پسندیدن", tint = if (isFavorite) Pink else White) }
+        }
+        Spacer(Modifier.height(22.dp))
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(30.dp)).background(Brush.linearGradient(listOf(Purple, Blue, Pink))), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.MusicNote, null, tint = White, modifier = Modifier.size(92.dp))
+                Spacer(Modifier.height(12.dp))
+                Text("BEATNOVA", color = White, fontSize = 27.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp)
+                Text("MUSIC • PLAYER", color = White.copy(alpha = .78f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Text(song.title, color = White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(song.artist, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 5.dp))
+        Spacer(Modifier.height(18.dp))
+        Slider(value = progress, onValueChange = onSeek, modifier = Modifier.fillMaxWidth(), colors = SliderDefaults.colors(thumbColor = Purple, activeTrackColor = Purple, inactiveTrackColor = Color.White.copy(alpha = .18f)))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(minutes((duration * progress).toLong()), color = Muted, fontSize = 11.sp)
+            Text(minutes(duration), color = Muted, fontSize = 11.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+            IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.SkipPrevious, "قبلی", tint = White, modifier = Modifier.size(30.dp)) }
+            FilledIconButton(onClick = onToggle, modifier = Modifier.size(72.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = White)) {
+                Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "مکث" else "پخش", tint = Bg, modifier = Modifier.size(38.dp))
+            }
+            IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.SkipNext, "بعدی", tint = White, modifier = Modifier.size(30.dp)) }
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            Icon(Icons.Default.GraphicEq, null, tint = Purple, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("BeatNova • پخش‌کننده موسیقی", color = Muted, fontSize = 12.sp)
         }
     }
 }
@@ -282,6 +355,6 @@ private fun clearPlaybackNotification(context: Context) = NotificationManagerCom
 
 @Composable private fun SettingsScreen(onAccount: () -> Unit) { Column(Modifier.fillMaxSize().padding(22.dp)) { Text("تنظیمات", color = White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold); Spacer(Modifier.height(20.dp)); Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(20.dp)).background(Panel).clickable { onAccount() }.padding(17.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(Purple.copy(alpha = .14f)), contentAlignment = Alignment.Center) { Icon(Icons.Default.PersonAdd, null, tint = Purple, modifier = Modifier.size(26.dp)) }; Spacer(Modifier.width(14.dp)); Column(Modifier.weight(1f)) { Text("ثبت‌نام / ورود", color = White, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text("ساخت حساب کاربری با Supabase", color = Muted, fontSize = 11.sp) }; Icon(Icons.Default.ChevronLeft, null, tint = Muted) }; Spacer(Modifier.height(8.dp)); SettingRow("کیفیت پخش", "بهینه برای اینترنت موبایل", Icons.Default.HighQuality); SettingRow("ظاهر برنامه", "تم تیره BeatNova", Icons.Default.DarkMode); SettingRow("درباره BeatNova", "سازنده: علی ساحلی • نسخه ${BuildConfig.VERSION_NAME}", Icons.Default.Info) } }
 @Composable private fun SettingRow(title: String, subtitle: String, icon: ImageVector) { Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(18.dp)).background(Panel).padding(15.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, tint = Purple, modifier = Modifier.size(25.dp)); Spacer(Modifier.width(14.dp)); Column { Text(title, color = White, fontWeight = FontWeight.Bold); Text(subtitle, color = Muted, fontSize = 11.sp) } } }
-@Composable private fun MiniPlayer(song: Song, playing: Boolean, toggle: () -> Unit) { Row(Modifier.fillMaxWidth().background(Color(0xFF171824)).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Pink, Purple))), contentAlignment = Alignment.Center) { Icon(Icons.Default.MusicNote, null, tint = White) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text(song.title, color = White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Muted, fontSize = 11.sp) }; IconButton(onClick = toggle) { Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = White) } } }
+@Composable private fun MiniPlayer(song: Song, playing: Boolean, toggle: () -> Unit, open: () -> Unit) { Row(Modifier.fillMaxWidth().background(Color(0xFF171824)).clickable(onClick = open).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Pink, Purple))), contentAlignment = Alignment.Center) { Icon(Icons.Default.MusicNote, null, tint = White) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text(song.title, color = White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Muted, fontSize = 11.sp) }; IconButton(onClick = toggle) { Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = White) } } }
 @Composable private fun BottomBar(selected: Int, onSelect: (Int) -> Unit) { Row(Modifier.fillMaxWidth().height(76.dp).background(Color(0xFF0E0F16)), verticalAlignment = Alignment.CenterVertically) { BottomItem(0, "خانه", Icons.Default.Home, selected, onSelect); BottomItem(1, "جستجو", Icons.Default.Search, selected, onSelect); BottomItem(2, "کتابخانه", Icons.Default.LibraryMusic, selected, onSelect); BottomItem(3, "دانلودها", Icons.Default.Download, selected, onSelect); BottomItem(4, "تنظیمات", Icons.Default.Settings, selected, onSelect) } }
 @Composable private fun RowScope.BottomItem(index: Int, label: String, icon: ImageVector, selected: Int, onSelect: (Int) -> Unit) { val active = index == selected; Box(Modifier.weight(1f).fillMaxHeight().clickable { onSelect(index) }, contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(icon, null, tint = if (active) Purple else Muted, modifier = Modifier.size(25.dp)); Spacer(Modifier.height(3.dp)); Text(label, color = if (active) White else Muted, fontSize = 11.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal) } } }
