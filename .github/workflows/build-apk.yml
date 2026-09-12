@@ -92,6 +92,11 @@ jobs:
           set -euo pipefail
           python scripts/patch-full-player.py
 
+      - name: Apply Adivery interstitial and app-open ads
+        run: |
+          set -euo pipefail
+          python scripts/patch-fullscreen-ads.py
+
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
@@ -110,6 +115,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          ADIVERY_APP_ID: ${{ secrets.ADIVERY_APP_ID }}
+          ADIVERY_BANNER_PLACEMENT_ID: ${{ secrets.ADIVERY_BANNER_PLACEMENT_ID }}
+          ADIVERY_INTERSTITIAL_PLACEMENT_ID: ${{ secrets.ADIVERY_INTERSTITIAL_PLACEMENT_ID }}
+          ADIVERY_APP_OPEN_PLACEMENT_ID: ${{ secrets.ADIVERY_APP_OPEN_PLACEMENT_ID }}
         run: |
           set -euo pipefail
           chmod +x gradlew
