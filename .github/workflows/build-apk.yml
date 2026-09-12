@@ -1,6 +1,6 @@
 name: BeatNova Android APK
-# Auth registration, password recovery, notifications, offline downloads and monetization architecture are enabled in the app.
-# CI trigger: verify the latest BeatNova ads + full-player integration.
+# Myket release pipeline: builds APK + AAB, applies release patches, and uploads artifacts.
+# Production signing requires CM_KEYSTORE_* secrets; without them CI uses the debug fallback for test builds.
 
 on:
   push:
@@ -25,7 +25,6 @@ jobs:
     name: Build Release APK + AAB
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
@@ -124,5 +123,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml
-          git commit -m "feat: add BeatNova full player screen"
+          git commit -m "chore: update generated BeatNova release sources"
           git push
