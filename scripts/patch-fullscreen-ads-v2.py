@@ -2,17 +2,19 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 
+# Configure the exact Adivery placements supplied for BeatNova.
 gradle = root / "app/build.gradle.kts"
 s = gradle.read_text()
 if "ADIVERY_INTERSTITIAL_PLACEMENT_ID" not in s:
     old = '        val adiveryBannerPlacementId = System.getenv("ADIVERY_BANNER_PLACEMENT_ID")?.takeIf { it.isNotBlank() } ?: "129de33c-9f73-45f8-a411-b0262faff3f9"\n'
-    new = old + '        val adiveryInterstitialPlacementId = System.getenv("ADIVERY_INTERSTITIAL_PLACEMENT_ID")?.takeIf { it.isNotBlank() } ?: ""\n        val adiveryAppOpenPlacementId = System.getenv("ADIVERY_APP_OPEN_PLACEMENT_ID")?.takeIf { it.isNotBlank() } ?: ""\n'
+    new = old + '        val adiveryInterstitialPlacementId = System.getenv("ADIVERY_INTERSTITIAL_PLACEMENT_ID")?.takeIf { it.isNotBlank() } ?: "fe68f200-abe4-4773-9ed2-a48e59883a76"\n        val adiveryAppOpenPlacementId = System.getenv("ADIVERY_APP_OPEN_PLACEMENT_ID")?.takeIf { it.isNotBlank() } ?: "3fb1f6a3-6aab-404b-9813-01a2c94682bc"\n'
     s = s.replace(old, new)
     old2 = '        buildConfigField("String", "ADIVERY_BANNER_PLACEMENT_ID", "\\"$adiveryBannerPlacementId\\"")\n'
     new2 = old2 + '        buildConfigField("String", "ADIVERY_INTERSTITIAL_PLACEMENT_ID", "\\"$adiveryInterstitialPlacementId\\"")\n        buildConfigField("String", "ADIVERY_APP_OPEN_PLACEMENT_ID", "\\"$adiveryAppOpenPlacementId\\"")\n'
     s = s.replace(old2, new2)
     gradle.write_text(s)
 
+# Add the ad controllers only once, preserving all existing player/auth/download UI.
 ad = root / "app/src/main/java/com/beatnova/app/AdManager.kt"
 s = ad.read_text()
 if "AppOpenAdLifecycle" not in s:
@@ -126,6 +128,7 @@ private class AppOpenAdLifecycle : Application.ActivityLifecycleCallbacks {
         s = s.replace('import android.content.Context\n', 'import android.content.Context\nimport android.os.Bundle\n')
     ad.write_text(s)
 
+# Trigger the interstitial from the existing song-start path, without changing playback behavior.
 main = root / "app/src/main/java/com/beatnova/app/MainActivity.kt"
 s = main.read_text()
 needle = '    fun play(song: Song) { current = song; player.setMediaItem(MediaItem.fromUri(song.audioUrl)); player.prepare(); player.play(); showFullPlayer = true; showPlaybackNotification(context, song, true) }'
@@ -134,4 +137,4 @@ if needle in s and 'AdManager.maybeShowInterstitial(context)' not in s:
     s = s.replace(needle, replacement)
 main.write_text(s)
 
-print("Fullscreen Adivery ads patch applied safely.")
+print("Adivery interstitial and app-open placements configured safely.")
