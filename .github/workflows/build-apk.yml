@@ -87,6 +87,11 @@ jobs:
           set -euo pipefail
           python scripts/patch-native-ad.py
 
+      - name: Apply BeatNova full player screen
+        run: |
+          set -euo pipefail
+          python scripts/patch-full-player.py
+
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
@@ -157,5 +162,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml
-          git commit -m "feat: wire BeatNova monetization architecture and About section"
+          git commit -m "feat: add BeatNova full player screen"
           git push
