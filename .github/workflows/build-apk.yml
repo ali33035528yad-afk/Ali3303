@@ -1,5 +1,6 @@
 name: BeatNova Android APK
 # Auth registration, password recovery, notifications, offline downloads and monetization architecture are enabled in the app.
+# CI trigger: verify the latest BeatNova ads + full-player integration.
 
 on:
   push:
@@ -28,75 +29,43 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
       - name: Install Android SDK 35
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-${ANDROID_API}" "build-tools;${BUILD_TOOLS}"
-
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
-
       - name: Prepare Android debug keystore for release test build
         run: |
           set -euo pipefail
           KEYSTORE="$HOME/.config/.android/debug.keystore"
           mkdir -p "$(dirname "$KEYSTORE")"
           if [ ! -f "$KEYSTORE" ]; then
-            keytool -genkeypair -v \
-              -keystore "$KEYSTORE" \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
+            keytool -genkeypair -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
           test -f "$KEYSTORE"
-
       - name: Apply Supabase auth recovery patch
-        run: |
-          set -euo pipefail
-          python scripts/patch-auth-recovery.py
-
+        run: python scripts/patch-auth-recovery.py
       - name: Apply offline downloads and library patch
-        run: |
-          set -euo pipefail
-          python scripts/patch-offline-downloads.py
-
+        run: python scripts/patch-offline-downloads.py
       - name: Apply ads architecture and About section patch
-        run: |
-          set -euo pipefail
-          python scripts/patch-ads-about.py
-
+        run: python scripts/patch-ads-about.py
       - name: Replace native ad placeholder with Adivery banner
-        run: |
-          set -euo pipefail
-          python scripts/patch-native-ad.py
-
+        run: python scripts/patch-native-ad.py
       - name: Apply BeatNova full player screen
-        run: |
-          set -euo pipefail
-          python scripts/patch-full-player.py
-
+        run: python scripts/patch-full-player.py
       - name: Apply Adivery interstitial and app-open ads
-        run: |
-          set -euo pipefail
-          python scripts/patch-fullscreen-ads-v2.py
-
+        run: python scripts/patch-fullscreen-ads-v2.py
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
@@ -104,13 +73,8 @@ jobs:
           p = Path('app/src/main/java/com/beatnova/app/MainActivity.kt')
           s = p.read_text()
           old = '.setStyle(NotificationCompat.MediaStyle().setShowActionsInCompactView(0))'
-          if old in s:
-              p.write_text(s.replace(old, ''))
-              print('Removed unsupported MediaStyle call.')
-          else:
-              print('MediaStyle call already fixed.')
+          if old in s: p.write_text(s.replace(old, ''))
           PY
-
       - name: Build Release APK and App Bundle
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -123,7 +87,6 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           ./gradlew --no-daemon --stacktrace clean assembleRelease bundleRelease
-
       - name: Verify APK and AAB output
         run: |
           set -euo pipefail
@@ -131,11 +94,8 @@ jobs:
           AAB="app/build/outputs/bundle/release/app-release.aab"
           test -f "$APK"
           test -f "$AAB"
-          echo "APK: $APK"
-          echo "AAB: $AAB"
           ls -lh "$APK" "$AAB"
           sha256sum "$APK" "$AAB"
-
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -143,7 +103,6 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14
-
       - name: Upload Play App Bundle artifact
         uses: actions/upload-artifact@v4
         with:
@@ -151,23 +110,17 @@ jobs:
           path: app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 14
-
       - name: Upload build metadata
         uses: actions/upload-artifact@v4
         with:
           name: BeatNova-build-info-${{ github.run_number }}
-          path: |
-            app/build/outputs/apk/release/output-metadata.json
+          path: app/build/outputs/apk/release/output-metadata.json
           if-no-files-found: warn
           retention-days: 14
-
       - name: Commit generated Android source changes
         run: |
           set -euo pipefail
-          if git diff --quiet -- app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml; then
-            echo "Generated Android source is already committed."
-            exit 0
-          fi
+          if git diff --quiet -- app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml; then exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/beatnova/app/MainActivity.kt app/src/main/AndroidManifest.xml
