@@ -95,7 +95,7 @@ jobs:
       - name: Apply Adivery interstitial and app-open ads
         run: |
           set -euo pipefail
-          python scripts/patch-fullscreen-ads.py
+          python scripts/patch-fullscreen-ads-v2.py
 
       - name: Fix notification compatibility
         run: |
