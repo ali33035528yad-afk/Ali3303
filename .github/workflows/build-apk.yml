@@ -77,6 +77,8 @@ jobs:
         run: python scripts/patch-fullscreen-ads-v2.py
       - name: Apply unique artwork to songs
         run: python scripts/patch-song-artwork.py
+      - name: Apply BeatNova Design 2
+        run: python scripts/patch-design2.py
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
