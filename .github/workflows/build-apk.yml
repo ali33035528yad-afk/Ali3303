@@ -142,4 +142,4 @@ jobs:
             BeatNova-release-myket-v2.apk
             app/build/outputs/bundle/release/app-release.aab
 
-# Trigger a fresh signed build after the APK signing fix.
+# Temporary signing is intentionally allowed until persistent signing secrets are configured.
