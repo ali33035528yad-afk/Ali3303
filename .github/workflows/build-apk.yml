@@ -79,6 +79,8 @@ jobs:
         run: python scripts/patch-song-artwork.py
       - name: Apply BeatNova Design 2
         run: python scripts/patch-design2.py
+      - name: Apply functional player controls and Supabase catalog
+        run: python scripts/patch-functional-catalog.py
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
