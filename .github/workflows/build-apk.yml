@@ -81,8 +81,6 @@ jobs:
         run: python scripts/patch-design2.py
       - name: Apply functional player controls and Supabase catalog
         run: python scripts/patch-functional-catalog.py
-      - name: Enable SVG song cover rendering
-        run: python scripts/patch-svg-artwork.py
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
