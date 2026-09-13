@@ -19,7 +19,7 @@ env:
 
 jobs:
   build-apk:
-    name: Build Release APK + AAB
+    name: Build Signed Release APK + AAB
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -46,14 +46,36 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Prepare debug keystore fallback
+      - name: Prepare persistent release signing
+        env:
+          KEYSTORE_B64: ${{ secrets.BEATNOVA_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.BEATNOVA_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.BEATNOVA_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.BEATNOVA_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          KEYSTORE="$HOME/.config/.android/debug.keystore"
-          mkdir -p "$(dirname "$KEYSTORE")"
-          if [ ! -f "$KEYSTORE" ]; then
-            keytool -genkeypair -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          KEYSTORE="$RUNNER_TEMP/beatnova-release.jks"
+          if [ -n "${KEYSTORE_B64:-}" ]; then
+            echo "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+            test -s "$KEYSTORE"
+            echo "Using BEATNOVA_KEYSTORE_BASE64 signing key."
+          else
+            echo "GitHub release key secrets are not configured; generating a temporary installable signing key."
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE" \
+              -storepass beatnova \
+              -alias beatnova \
+              -keypass beatnova \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=BeatNova, O=BeatNova, C=US"
+            KEYSTORE_PASSWORD=beatnova
+            KEY_ALIAS=beatnova
+            KEY_PASSWORD=beatnova
           fi
+          echo "CM_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "CM_KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD:-beatnova}" >> "$GITHUB_ENV"
+          echo "CM_KEY_ALIAS=${KEY_ALIAS:-beatnova}" >> "$GITHUB_ENV"
+          echo "CM_KEY_PASSWORD=${KEY_PASSWORD:-beatnova}" >> "$GITHUB_ENV"
 
       - name: Apply Supabase auth recovery patch
         run: python scripts/patch-auth-recovery.py
@@ -97,21 +119,26 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon --stacktrace clean assembleRelease bundleRelease
 
-      - name: Verify APK and AAB output
+      - name: Verify APK is signed and installable
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/release/app-release.apk"
           AAB="app/build/outputs/bundle/release/app-release.aab"
           test -s "$APK"
           test -s "$AAB"
+          "$ANDROID_HOME/build-tools/${BUILD_TOOLS}/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/${BUILD_TOOLS}/apksigner" verify --print-certs "$APK"
           ls -lh "$APK" "$AAB"
           sha256sum "$APK" "$AAB"
+
+      - name: Rename release APK
+        run: cp app/build/outputs/apk/release/app-release.apk "BeatNova-release-myket-v2.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: BeatNova-release-apk-${{ github.run_number }}
-          path: app/build/outputs/apk/release/*.apk
+          path: BeatNova-release-myket-v2.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -130,3 +157,14 @@ jobs:
           path: app/build/outputs/apk/release/output-metadata.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beatnova-build-${{ github.run_number }}
+          name: BeatNova build ${{ github.run_number }}
+          generate_release_notes: true
+          prerelease: true
+          files: |
+            BeatNova-release-myket-v2.apk
+            app/build/outputs/bundle/release/app-release.aab
