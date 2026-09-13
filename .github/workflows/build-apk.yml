@@ -75,6 +75,8 @@ jobs:
         run: python scripts/patch-full-player.py
       - name: Apply Adivery interstitial and app-open ads
         run: python scripts/patch-fullscreen-ads-v2.py
+      - name: Apply unique artwork to songs
+        run: python scripts/patch-song-artwork.py
       - name: Fix notification compatibility
         run: |
           python - <<'PY'
