@@ -27,6 +27,15 @@ jobs:
       - name: Apply BeatNova Design 2
         run: python3 scripts/patch-design2.py
 
+      - name: Apply functional catalog
+        run: python3 scripts/patch-functional-catalog.py
+
+      - name: Restore stable categories and featured recommendations
+        run: python3 scripts/patch-home-categories.py
+
+      - name: Apply reliable local artwork
+        run: python3 scripts/patch-reliable-artwork.py
+
       - name: Build APK
         run: ./gradlew assembleDebug --no-daemon
 
