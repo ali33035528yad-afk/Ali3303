@@ -81,6 +81,32 @@ private fun SongArtwork(song: Song, modifier: Modifier = Modifier, large: Boolea
         } else {
             Icon(Icons.Default.MusicNote, null, tint = Purple, modifier = Modifier.size(if (large) 48.dp else 28.dp))
         }
+
+        // Match the other BeatNova artwork cards: this custom photo gets the song branding/title over it.
+        if (song.id == 6L) {
+            Box(modifier = Modifier.fillMaxSize().padding(if (large) 18.dp else 10.dp)) {
+                Text(
+                    text = "BeatNova • الکترونیک",
+                    color = Color.White,
+                    fontSize = if (large) 16.sp else 11.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.TopStart)
+                )
+                Column(modifier = Modifier.align(Alignment.BottomStart)) {
+                    Text(
+                        text = "Naro Naro",
+                        color = Color.White,
+                        fontSize = if (large) 23.sp else 15.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                    )
+                    Text(
+                        text = "Ghadimy Al Remix",
+                        color = Color(0xFFE5E7EB),
+                        fontSize = if (large) 14.sp else 9.sp
+                    )
+                }
+            }
+        }
     }
 }'''
 
@@ -92,4 +118,4 @@ g = gradle.read_text(encoding='utf-8')
 if 'implementation("io.coil-kt:coil-svg:2.7.0")' not in g:
     g = g.replace('implementation("io.coil-kt:coil-compose:2.7.0")', 'implementation("io.coil-kt:coil-compose:2.7.0")\n    implementation("io.coil-kt:coil-svg:2.7.0")', 1)
 gradle.write_text(g, encoding='utf-8')
-print('Online-only Supabase cover_url artwork enabled with explicit SVG decoder')
+print('Online-only Supabase cover_url artwork enabled with explicit SVG decoder and custom song branding')
