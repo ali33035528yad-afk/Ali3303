@@ -1,9 +1,7 @@
 from pathlib import Path
 import re
 
-# Use the original per-song SVG artwork already stored in the repository.
-# This keeps artwork stable, avoids placeholder initials, and does not touch
-# playback, auth, downloads, favorites, ads, or the Supabase catalog logic.
+# Online-only artwork. The app reads cover_url from Supabase and never bundles artwork locally.
 main = Path('app/src/main/java/com/beatnova/app/MainActivity.kt')
 s = main.read_text(encoding='utf-8')
 
@@ -24,17 +22,12 @@ end = None
 for i in range(brace, len(s)):
     ch = s[i]
     if string:
-        if escape:
-            escape = False
-        elif ch == '\\':
-            escape = True
-        elif ch == '"':
-            string = False
+        if escape: escape = False
+        elif ch == '\\': escape = True
+        elif ch == '"': string = False
     else:
-        if ch == '"':
-            string = True
-        elif ch == '{':
-            depth += 1
+        if ch == '"': string = True
+        elif ch == '{': depth += 1
         elif ch == '}':
             depth -= 1
             if depth == 0:
@@ -45,33 +38,22 @@ if end is None:
 
 new_fn = '''@Composable
 private fun SongArtwork(song: Song, modifier: Modifier = Modifier, large: Boolean = false) {
-    val artworkUrl = when (song.id) {
-        "1" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-1.svg"
-        "2" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-2.svg"
-        "3" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-3.svg"
-        "4" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-4.svg"
-        "5" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-5.svg"
-        "6" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-6.svg"
-        "7" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-7.svg"
-        "8" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-8.svg"
-        else -> song.coverUrl
-    }.let { fallback -> song.coverUrl.trim().ifBlank { fallback } }
-
+    // The image URL comes only from Supabase songs.cover_url and is loaded online.
+    val artworkUrl = song.coverUrl.trim()
+    val shape = RoundedCornerShape(if (large) 24.dp else 14.dp)
     Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(if (large) 24.dp else 14.dp))
-            .background(Brush.linearGradient(listOf(Purple, Blue, Pink))),
+        modifier = modifier.clip(shape).background(Color(0xFF171923)),
         contentAlignment = Alignment.Center
     ) {
         if (artworkUrl.isNotBlank()) {
             AsyncImage(
                 model = artworkUrl,
                 contentDescription = song.title,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().clip(shape),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
             )
         } else {
-            Text("♫", color = White, fontSize = if (large) 54.sp else 22.sp, fontWeight = FontWeight.ExtraBold)
+            Icon(Icons.Default.MusicNote, null, tint = Purple, modifier = Modifier.size(if (large) 48.dp else 28.dp))
         }
     }
 }'''
@@ -84,4 +66,4 @@ g = gradle.read_text(encoding='utf-8')
 if 'implementation("io.coil-kt:coil-svg:2.7.0")' not in g:
     g = g.replace('implementation("io.coil-kt:coil-compose:2.7.0")', 'implementation("io.coil-kt:coil-compose:2.7.0")\n    implementation("io.coil-kt:coil-svg:2.7.0")', 1)
 gradle.write_text(g, encoding='utf-8')
-print('Reliable SVG artwork enabled for all song cards and full player')
+print('Online-only Supabase cover_url artwork enabled')
