@@ -1,53 +1,87 @@
 from pathlib import Path
 import re
 
-p = Path('app/src/main/java/com/beatnova/app/MainActivity.kt')
-s = p.read_text(encoding='utf-8')
+# Use the original per-song SVG artwork already stored in the repository.
+# This keeps artwork stable, avoids placeholder initials, and does not touch
+# playback, auth, downloads, favorites, ads, or the Supabase catalog logic.
+main = Path('app/src/main/java/com/beatnova/app/MainActivity.kt')
+s = main.read_text(encoding='utf-8')
 
-# Add painterResource import.
-if 'import androidx.compose.ui.res.painterResource' not in s:
-    s = s.replace('import androidx.compose.ui.platform.LocalContext\n', 'import androidx.compose.ui.platform.LocalContext\nimport androidx.compose.ui.res.painterResource\n', 1)
+if 'import coil.compose.AsyncImage' not in s:
+    s = s.replace('import androidx.media3.common.MediaItem\n', 'import coil.compose.AsyncImage\nimport androidx.media3.common.MediaItem\n', 1)
 
-# Replace any SongArtwork function with a simple, guaranteed local vector fallback.
-start = s.find('@Composable private fun SongArtwork')
-if start < 0:
+pattern = re.compile(r'@Composable\s+private fun SongArtwork\s*\([^)]*\)\s*\{')
+m = pattern.search(s)
+if not m:
     raise SystemExit('SongArtwork function not found')
-next_fun = s.find('\n@Composable', start + 10)
-if next_fun < 0:
-    next_fun = len(s)
-new_fn = '''@Composable private fun SongArtwork(song: Song, modifier: Modifier = Modifier) {
-    val artwork = when (song.id) {
-        "1" -> R.drawable.cover_1
-        "2" -> R.drawable.cover_2
-        "3" -> R.drawable.cover_3
-        "4" -> R.drawable.cover_4
-        "5" -> R.drawable.cover_5
-        "6" -> R.drawable.cover_6
-        "7" -> R.drawable.cover_7
-        "8" -> R.drawable.cover_8
-        else -> R.drawable.cover_default
-    }
-    androidx.compose.foundation.Image(
-        painter = painterResource(artwork),
-        contentDescription = song.title,
-        modifier = modifier,
-        contentScale = androidx.compose.ui.layout.ContentScale.Crop
-    )
-}
-'''
-s = s[:start] + new_fn + s[next_fun:]
-p.write_text(s, encoding='utf-8')
 
-res = Path('app/src/main/res/drawable')
-res.mkdir(parents=True, exist_ok=True)
-colors = ['#5B2EFF','#E94F9B','#16B8D4','#FF6B35','#8B5CF6','#00A884','#F59E0B','#EC4899']
-for i, color in enumerate(colors, 1):
-    xml = f'''<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="800dp" android:height="800dp" android:viewportWidth="800" android:viewportHeight="800">
- <path android:fillColor="{color}" android:pathData="M0,0h800v800h-800z"/>
- <path android:fillColor="#33000000" android:pathData="M0,600L800,200v600H0z"/>
- <path android:fillColor="#FFFFFFFF" android:pathData="M430,350V180l100,-20v45l-70,14v131c0,35 -28,63 -63,63s-63,-28 -63,-63 28,-63 63,-63c12,0 23,3 33,9V160l-100,20v-45l123,-25c12,-2 23,7 23,20v220z"/>
- <path android:fillColor="#66FFFFFF" android:pathData="M80,80h640v640h-640z" android:strokeColor="#66FFFFFF" android:strokeWidth="3" android:fillAlpha="0"/>
-</vector>'''
-    (res / f'cover_{i}.xml').write_text(xml, encoding='utf-8')
-(res / 'cover_default.xml').write_text((res / 'cover_1.xml').read_text(), encoding='utf-8')
-print('Reliable local vector artwork installed')
+start = m.start()
+brace = s.find('{', m.start(), m.end())
+depth = 0
+string = False
+escape = False
+end = None
+for i in range(brace, len(s)):
+    ch = s[i]
+    if string:
+        if escape:
+            escape = False
+        elif ch == '\\':
+            escape = True
+        elif ch == '"':
+            string = False
+    else:
+        if ch == '"':
+            string = True
+        elif ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+if end is None:
+    raise SystemExit('SongArtwork body could not be parsed')
+
+new_fn = '''@Composable
+private fun SongArtwork(song: Song, modifier: Modifier = Modifier, large: Boolean = false) {
+    val artworkUrl = when (song.id) {
+        "1" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-1.svg"
+        "2" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-2.svg"
+        "3" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-3.svg"
+        "4" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-4.svg"
+        "5" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-5.svg"
+        "6" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-6.svg"
+        "7" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-7.svg"
+        "8" -> "https://raw.githubusercontent.com/ali33035528yad-afk/Ali3303/main/artwork/song-8.svg"
+        else -> song.coverUrl
+    }.let { fallback -> song.coverUrl.trim().ifBlank { fallback } }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(if (large) 24.dp else 14.dp))
+            .background(Brush.linearGradient(listOf(Purple, Blue, Pink))),
+        contentAlignment = Alignment.Center
+    ) {
+        if (artworkUrl.isNotBlank()) {
+            AsyncImage(
+                model = artworkUrl,
+                contentDescription = song.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+            )
+        } else {
+            Text("♫", color = White, fontSize = if (large) 54.sp else 22.sp, fontWeight = FontWeight.ExtraBold)
+        }
+    }
+}'''
+
+s = s[:start] + new_fn + s[end:]
+main.write_text(s, encoding='utf-8')
+
+gradle = Path('app/build.gradle.kts')
+g = gradle.read_text(encoding='utf-8')
+if 'implementation("io.coil-kt:coil-svg:2.7.0")' not in g:
+    g = g.replace('implementation("io.coil-kt:coil-compose:2.7.0")', 'implementation("io.coil-kt:coil-compose:2.7.0")\n    implementation("io.coil-kt:coil-svg:2.7.0")', 1)
+gradle.write_text(g, encoding='utf-8')
+print('Reliable SVG artwork enabled for all song cards and full player')
