@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /home/runner/.android/debug.keystore
+      GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+      GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
 
     steps:
       - name: Checkout
@@ -91,6 +95,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "APK files found:"
           find . -type f -name '*.apk' -print
 
       - name: Upload APK artifact
