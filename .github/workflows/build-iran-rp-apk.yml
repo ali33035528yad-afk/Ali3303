@@ -91,6 +91,14 @@ jobs:
           export_debug: true
           verbose: true
 
+      - name: Copy APK into workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cp "/home/runner/.local/share/godot/builds/Android/IranRP-Online.apk" "build/IranRP-Online.apk"
+          ls -lh build/IranRP-Online.apk
+
       - name: Find APK
         shell: bash
         run: |
@@ -102,5 +110,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: IranRP-Online-APK
-          path: '**/*.apk'
+          path: build/IranRP-Online.apk
           if-no-files-found: error
